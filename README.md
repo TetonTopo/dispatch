@@ -1,10 +1,11 @@
 # Dispatch
 
-Your Claude chats on the iPhone home screen. Hold it sideways: the three most recent Claude threads (Co-work or Claude Code) and a **New chat** corner, in a 2×2 grid. Each card shows the first sentence of Claude's last reply.
+Your Claude chats on the iPhone home screen. The three most recent Claude threads (Co-work or Claude Code) fill three quarters of a 2×2 grid that always reads landscape. Each card shows the first sentence of Claude's last reply. The fourth quarter is split into **New chat** and **All threads**.
 
-- **Tap** a card to open the whole thread and reply.
+- **Tap** a card to open the whole thread and reply. Full-screen pages follow the phone, so you can read them upright or sideways.
 - **Hold** a card to dictate. The card turns orange; let go, and it sends after 1.8 s unless you press **Edit** or **Cancel**.
-- **New chat** starts a Co-work chat or a Claude Code session (pick the environment).
+- **New chat** starts a Co-work chat or a Claude Code session (pick the environment), always on Opus 5.5.
+- **All threads** lists your recent chats and Code sessions, with search. Tap one to open it.
 - Add `?demo` to the address to see it with made-up data.
 
 Dispatch is only the phone side: plain HTML, CSS and JS, with no build step. The server is part of [Monodesk](https://github.com/TetonTopo/monodesk) (`bridge.js`), which uses Monodesk's Claude sign-in. **Monodesk must be running on your PC** for Dispatch to work.

@@ -12,7 +12,7 @@
   --sans: -apple-system, system-ui, "Segoe UI", sans-serif;
   --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   --gap: 8px;
-  /* The visible window. app.js sets these from innerWidth/innerHeight; 100vh on iOS includes space under the toolbars. */
+  /* The visible window. Dynamic units change in step with the orientation rule below; 100vh on iOS includes space under the toolbars. */
   --vw: 100dvw;
   --vh: 100dvh;
 }
@@ -24,14 +24,19 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); c
   position: fixed; top: 0; left: 0; width: var(--vw); height: var(--vh); overflow: hidden;
   padding: calc(env(safe-area-inset-top) + 8px) calc(env(safe-area-inset-right) + 8px) calc(env(safe-area-inset-bottom) + 8px) calc(env(safe-area-inset-left) + 8px);
 }
-/* Upright (or rotation-locked): turn the stage a quarter clockwise so it still reads landscape. */
+/* Upright (or rotation-locked): turn the 2×2 a quarter clockwise so it still reads landscape.
+   Full-screen pages (html.free) skip this and follow the phone, so they work upright too. */
 @media (orientation: portrait) {
-  #stage {
+  html:not(.free) #stage {
     left: var(--vw); width: var(--vh); height: var(--vw);
     transform-origin: top left; transform: rotate(90deg);
     padding: calc(env(safe-area-inset-right) + 8px) calc(env(safe-area-inset-bottom) + 8px) calc(env(safe-area-inset-left) + 8px) calc(env(safe-area-inset-top) + 8px);
   }
 }
+
+/* When the phone turns, the 2×2 vanishes for the flip and fades back in, instead of jumping. */
+#stage { transition: opacity .28s ease; }
+#stage.turning { opacity: 0; transition: none; }
 
 #grid { height: 100%; display: grid; grid-template: repeat(2, minmax(0, 1fr)) / repeat(2, minmax(0, 1fr)); gap: var(--gap); }
 
@@ -68,34 +73,53 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); c
 .bar button { background: rgba(31, 30, 29, .15); border: 1px solid rgba(31, 30, 29, .35); color: inherit; border-radius: 8px; padding: 4px 10px; font-size: 12px; font-weight: 600; }
 .card:not(.live) .bar button { background: transparent; border-color: var(--line); color: var(--dim); }
 
-/* The new-chat corner. */
-.card.new { align-items: center; justify-content: center; border-style: dashed; background: transparent; color: var(--dim); gap: 8px; }
+/* The fourth corner: New chat on one half, All threads on the other. */
+.card.new { flex-direction: row; gap: 0; padding: 0; border-style: dashed; background: transparent; color: var(--dim); cursor: default; }
+.card.new:active { transform: none; }
+.card.new .half { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; background: transparent; border: 0; color: inherit; padding: 8px; }
+.card.new .half + .half { border-left: 1px dashed var(--line); }
+.card.new .half:active { background: rgba(255, 255, 255, .04); }
 .card.new .plus { width: 44px; height: 44px; border-radius: 50%; border: 1px solid var(--line); display: grid; place-items: center; font: 300 28px/1 var(--sans); padding-bottom: 3px; color: var(--text); }
+.card.new .plus svg { width: 20px; height: 20px; margin-top: 3px; }
 .card.new span { font-size: 14px; font-weight: 500; }
 
-/* Full-screen thread. */
+/* Full-screen pages (a thread, the list). They follow the phone, upright or sideways. Text is iPhone-app sized. */
 #thread { position: absolute; inset: 0; z-index: 4; background: var(--bg); display: flex; flex-direction: column;
   padding: inherit; animation: fade .2s ease; }
 #thread[hidden] { display: none; }
 #thread .top { display: flex; align-items: center; gap: 10px; padding: 0 2px 8px; flex: none; }
-#thread .back { width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--line); background: var(--card); color: var(--text); font: 20px/1 var(--sans); display: grid; place-items: center; padding-bottom: 2px; }
-#thread .top .t { flex: 1; min-width: 0; font-weight: 600; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-#thread .body { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 0 6px 8px; }
-.m { margin: 10px 0; max-width: 820px; }
-.m.user { margin-left: auto; width: fit-content; max-width: 75%; background: var(--user); border-radius: 14px; padding: 8px 12px; font-size: 15px; white-space: pre-wrap; word-wrap: break-word; }
-.m.assistant { font-family: var(--serif); font-size: 16.5px; line-height: 1.5; word-wrap: break-word; }
+#thread .back { width: 32px; height: 32px; flex: none; border-radius: 50%; border: 1px solid var(--line); background: var(--card); color: var(--text); font: 20px/1 var(--sans); display: grid; place-items: center; padding-bottom: 2px; }
+#thread .top .t { flex: 1; min-width: 0; font-weight: 600; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#thread .body { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; padding: 0 4px 8px; }
+.m { margin: 8px 0; max-width: 760px; }
+.m.user { margin-left: auto; width: fit-content; max-width: 80%; background: var(--user); border-radius: 14px; padding: 7px 11px; font-size: 14.5px; line-height: 1.4; white-space: pre-wrap; word-wrap: break-word; }
+.m.assistant { font-family: var(--serif); font-size: 15px; line-height: 1.45; word-wrap: break-word; }
 .m.assistant p { margin: 0 0 .6em; }
 .m.assistant p:last-child { margin-bottom: 0; }
 .m.assistant ul, .m.assistant ol { margin: 0 0 .6em; padding-left: 1.3em; }
-.m.assistant h3 { font: 600 15px/1.35 var(--sans); margin: .8em 0 .35em; }
-.m code { font: 13px var(--mono); background: rgba(255,255,255,.07); border-radius: 4px; padding: 1px 4px; }
-.m pre { font: 12.5px/1.45 var(--mono); background: #1a1918; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; overflow-x: auto; margin: 0 0 .6em; }
+.m.assistant h3 { font: 600 14px/1.35 var(--sans); margin: .8em 0 .35em; }
+.m code { font: 12px var(--mono); background: rgba(255,255,255,.07); border-radius: 4px; padding: 1px 4px; }
+.m pre { font: 11.5px/1.45 var(--mono); background: #1a1918; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; overflow-x: auto; margin: 0 0 .6em; }
+
+/* The list of every recent thread. */
+.search { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 0 10px; color: var(--faint); }
+.search svg { width: 16px; height: 16px; flex: none; }
+/* 16px keeps iOS from zooming in when the box is tapped. */
+.search input { flex: 1; min-width: 0; height: 34px; border: 0; outline: none; background: transparent; color: var(--text); font: 16px var(--sans); -webkit-appearance: none; }
+.list .row { width: 100%; display: flex; align-items: center; gap: 10px; text-align: left; background: transparent; border: 0; border-bottom: 1px solid var(--line); padding: 11px 6px; }
+.list .row:active { background: var(--card); }
+.list .row .k { width: 15px; height: 15px; flex: none; color: var(--accent); }
+.list .row .k.code { color: var(--dim); }
+.list .row .t { flex: 1; min-width: 0; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.list .row .w { font-size: 12px; color: var(--faint); flex: none; }
+.list .none { color: var(--faint); font-size: 14px; text-align: center; padding: 24px; }
 .m pre code { background: none; padding: 0; }
 .m a { color: var(--accent); }
 
 /* Composer: big, plain, easy to type into. */
 .compose { flex: none; display: flex; align-items: flex-end; gap: 8px; background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 6px 6px 6px 14px; }
-.compose textarea { flex: 1; min-height: 40px; max-height: 140px; resize: none; border: 0; outline: none; background: transparent; color: var(--text); font: 17px/1.4 var(--sans); padding: 8px 0; }
+/* 16px keeps iOS from zooming in when the box is tapped. */
+.compose textarea { flex: 1; min-height: 38px; max-height: 140px; resize: none; border: 0; outline: none; background: transparent; color: var(--text); font: 16px/1.4 var(--sans); padding: 8px 0; }
 .compose textarea::placeholder { color: var(--faint); }
 .icbtn { width: 40px; height: 40px; flex: none; border-radius: 12px; border: 0; display: grid; place-items: center; background: transparent; color: var(--dim); }
 .icbtn svg { width: 20px; height: 20px; }

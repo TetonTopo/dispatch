@@ -10,18 +10,27 @@ const POLL = 4000;
 const HOLD_MS = 350;
 const SEND_DELAY = 1800;
 
-// Size the stage to the window you can actually see, so the 2×2 is four even quarters on every iPhone.
-function fit() {
-  document.documentElement.style.setProperty('--vw', innerWidth + 'px');
-  document.documentElement.style.setProperty('--vh', innerHeight + 'px');
+// The 2×2 always reads landscape; when the phone turns, CSS flips the stage, and it fades back in instead of jumping.
+// Full-screen pages (a thread, the list) are "free": they follow the phone, so portrait works there.
+const root = document.documentElement;
+const upright = matchMedia('(orientation: portrait)');
+function turn() {
+  stage.classList.add('turning');
+  clearTimeout(turn.t);
+  turn.t = setTimeout(() => stage.classList.remove('turning'), 60); // a timer, not rAF: it always fires
 }
-fit();
-addEventListener('resize', fit);
-addEventListener('orientationchange', () => setTimeout(fit, 300));
+function setFree(on) {
+  if (root.classList.contains('free') === on) return;
+  if (upright.matches) turn();
+  root.classList.toggle('free', on);
+}
+upright.addEventListener('change', () => { if (!root.classList.contains('free')) turn(); });
 
 const ICON = {
   cowork: '<svg class="k" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l1.8 6.2L20 10l-6.2 1.8L12 18l-1.8-6.2L4 10l6.2-1.8z"/></svg>',
   code: '<svg class="k code" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17l6-5-6-5M12 19h8"/></svg>',
+  list: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01"/></svg>',
+  search: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>',
   mic: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0014 0M12 18v3"/></svg>',
   send: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>',
 };
@@ -33,10 +42,13 @@ const DEMO = new URLSearchParams(location.search).has('demo') && [
   { key: 'code:b', kind: 'code', title: 'monodesk: phone bridge', updated: Date.now() - 900e3, busy: false, messages: [{ role: 'user', text: 'Add a /api/threads endpoint' }, { role: 'assistant', text: 'Done, it lives in `bridge.js` and returns the four newest threads. I also added a demo mode.\n\n```js\nserver.listen(47800)\n```' }] },
   { key: 'cowork:c', kind: 'cowork', title: 'Inbox triage', updated: Date.now() - 4e6, busy: false, messages: [{ role: 'assistant', text: 'Three emails need you today! First, Sam wants to confirm Thursday.' }] },
 ];
+const DEMO_OLD = DEMO && ['Character reference letter', 'Notion hours table cleanup', 'Trailer budget v3', 'Squamish rental search', 'Fix the WhatsApp pin', 'Gmail filters'].map((title, i) => ({ key: (i % 3 ? 'cowork:o' : 'code:o') + i, kind: i % 3 ? 'cowork' : 'code', title, updated: Date.now() - (i + 2) * 864e5, busy: false, messages: [{ role: 'user', text: 'Can you help with ' + title.toLowerCase() + '?' }, { role: 'assistant', text: 'Sure. Here is where I would start.' }] }));
 async function api(path, body) {
   if (DEMO) {
     if (path === '/api/new') return { key: 'cowork:a' };
     if (body) return { ok: true };
+    if (path.startsWith('/api/history')) return { threads: [...DEMO, ...DEMO_OLD] };
+    if (path.startsWith('/api/threads/')) return [...DEMO, ...DEMO_OLD].find((t) => t.key === decodeURIComponent(path.slice(13)));
     return path.startsWith('/api/environments') ? { envs: [{ id: 'env_a', label: 'project', where: 'My PC · C:\\Users\\me\\project' }, { id: 'env_b', label: 'Default', where: 'Anthropic cloud' }] } : { threads: DEMO };
   }
   const r = await fetch(path, body ? { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Monodesk': '1' }, body: JSON.stringify(body) } : { cache: 'no-store' });
@@ -89,7 +101,7 @@ const ago = (t) => {
 };
 const status = (t) => (t.busy ? '<span class="dots"><i></i><i></i><i></i></span>' : `<span class="w">${ago(t.updated)}</span>`);
 
-/* ---------- the grid: three thread corners, the fourth starts a new chat ---------- */
+/* ---------- the grid: three thread corners; the fourth is half new chat, half the list of all threads ---------- */
 const slots = Array(SLOTS).fill(null); // thread keys
 const cards = [];
 let threads = new Map();
@@ -104,8 +116,10 @@ for (let i = 0; i < SLOTS; i++) {
 }
 const newCard = document.createElement('section');
 newCard.className = 'card new';
-newCard.innerHTML = '<div class="plus">+</div><span>New chat</span>';
-newCard.addEventListener('click', pickKind);
+newCard.innerHTML = `<button class="half" data-new><div class="plus">+</div><span>New chat</span></button>
+  <button class="half" data-all><div class="plus">${ICON.list}</div><span>All threads</span></button>`;
+$('[data-new]', newCard).addEventListener('click', pickKind);
+$('[data-all]', newCard).addEventListener('click', () => openList());
 grid.appendChild(newCard);
 
 function placeThreads(list) {
@@ -225,28 +239,75 @@ function wireCard(card, i) {
 
 /* ---------- full-screen thread with a composer ---------- */
 let openKey = null, pendingNew = null;
+let opened = null; // the open thread's own copy, for threads that aren't in the top three
+let fromList = null; // the list's search text, when the open thread came from the list (Back returns there)
 
-function openThread(key, draft) {
+function showView(html) {
+  view.hidden = false;
+  view.innerHTML = html;
+  setFree(true);
+}
+
+function openThread(key, draft, listQuery) {
   openKey = key;
   pendingNew = null;
-  view.hidden = false;
-  view.innerHTML = `<div class="top"><button class="back" aria-label="Back">‹</button><span class="hdk"></span><span class="t"></span><span class="st"></span></div>
-    <div class="body"></div>${composerHTML()}`;
+  opened = null;
+  fromList = listQuery ?? null;
+  showView(`<div class="top"><button class="back" aria-label="Back">‹</button><span class="hdk"></span><span class="t"></span><span class="st"></span></div>
+    <div class="body"></div>${composerHTML()}`);
   $('.back', view).onclick = closeThread;
   wireComposer(draft, async (text) => {
     await api(`/api/threads/${encodeURIComponent(openKey)}/reply`, { text });
     poll(true);
   });
   drawThread(true);
+  if (!threads.has(key)) loadOpened();
+}
+
+async function loadOpened() {
+  const key = openKey;
+  try {
+    const t = await api('/api/threads/' + encodeURIComponent(key));
+    if (openKey === key && t) { opened = t; drawThread(); }
+  } catch (e) { if (openKey === key) toast(e.message); }
+}
+
+/* ---------- every recent thread, searchable ---------- */
+let allThreads = [];
+
+function openList(query = '') {
+  openKey = null;
+  pendingNew = null;
+  fromList = null;
+  showView(`<div class="top"><button class="back" aria-label="Back">‹</button>
+    <label class="search">${ICON.search}<input type="search" placeholder="Search threads" enterkeyhint="search" autocomplete="off"></label></div>
+    <div class="body list"></div>`);
+  $('.back', view).onclick = closeThread;
+  const input = $('input', view);
+  input.value = query;
+  input.addEventListener('input', drawList);
+  drawList();
+  api('/api/history').then((r) => { allThreads = r.threads || []; if (!openKey && !view.hidden && $('.list', view)) drawList(); }).catch((e) => toast(e.message));
+}
+
+function drawList() {
+  const body = $('.list', view), input = $('input', view);
+  if (!body) return;
+  const q = input.value.trim().toLowerCase();
+  const rows = allThreads.filter((t) => !q || t.title.toLowerCase().includes(q));
+  body.innerHTML = rows.length
+    ? rows.map((t) => `<button class="row" data-key="${esc(t.key)}">${ICON[t.kind] || ICON.cowork}<span class="t">${esc(t.title)}</span><span class="w">${ago(t.updated)}</span></button>`).join('')
+    : `<div class="none">${allThreads.length ? 'No threads match.' : 'Loading…'}</div>`;
+  body.querySelectorAll('[data-key]').forEach((b) => b.addEventListener('click', () => openThread(b.dataset.key, '', input.value)));
 }
 
 // A brand-new thread: the same screen, empty until the first message goes.
 function openNew(kind, env, label) {
   openKey = null;
   pendingNew = { kind, env };
-  view.hidden = false;
-  view.innerHTML = `<div class="top"><button class="back" aria-label="Back">‹</button>${ICON[kind]}<span class="t">${kind === 'code' ? 'New Claude Code session' + (label ? ' · ' + esc(label) : '') : 'New Co-work chat'}</span></div>
-    <div class="body"></div>${composerHTML()}`;
+  fromList = null;
+  showView(`<div class="top"><button class="back" aria-label="Back">‹</button>${ICON[kind]}<span class="t">${kind === 'code' ? 'New Claude Code session' + (label ? ' · ' + esc(label) : '') : 'New Co-work chat'}</span></div>
+    <div class="body"></div>${composerHTML()}`);
   $('.back', view).onclick = closeThread;
   wireComposer('', async (text) => {
     const r = await api('/api/new', { kind, text, env });
@@ -256,11 +317,16 @@ function openNew(kind, env, label) {
   });
 }
 
-function closeThread() { openKey = null; pendingNew = null; view.hidden = true; view.innerHTML = ''; }
+function closeThread() {
+  if (fromList !== null) return openList(fromList);
+  openKey = null; pendingNew = null; opened = null;
+  view.hidden = true; view.innerHTML = '';
+  setFree(false);
+}
 
 function drawThread(fresh) {
   if (!openKey || view.hidden) return;
-  const t = threads.get(openKey);
+  const t = threads.get(openKey) || opened;
   const body = $('.body', view);
   if (!t) { if (fresh) body.innerHTML = '<div class="m assistant"><p style="color:var(--faint)">Starting…</p></div>'; return; }
   $('.hdk', view).innerHTML = ICON[t.kind] || ICON.cowork;
@@ -351,6 +417,8 @@ async function poll(now) {
   else if (r.error === 'signed-out') notice('Sign in to Claude in Monodesk on your computer, then come back.');
   else if (r.error && !(r.threads || []).length) notice('Monodesk can’t read Claude right now (' + r.error + ').');
   else { clearNotice(); placeThreads(r.threads || []); }
+  // A thread opened from the list isn't in the top three, so it's fetched on its own.
+  if (openKey && r && !threads.has(openKey)) await loadOpened();
   inFlight = false;
   if (!document.hidden) pollTimer = setTimeout(poll, POLL);
 }
