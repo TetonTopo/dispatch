@@ -19,8 +19,12 @@ function turn() {
   clearTimeout(turn.t);
   turn.t = setTimeout(() => stage.classList.remove('turning'), 60); // a timer, not rAF: it always fires
 }
+// ?embed=monodesk: Dispatch inside Monodesk's Home panel. No turning, hover Open buttons, and Monodesk can start chats here.
+const EMBED = new URLSearchParams(location.search).get('embed') === 'monodesk';
+if (EMBED) root.classList.add('free', 'embed');
+const toMonodesk = (msg) => { if (EMBED) parent.postMessage({ from: 'dispatch', ...msg }, '*'); };
 function setFree(on) {
-  if (root.classList.contains('free') === on) return;
+  if (EMBED || root.classList.contains('free') === on) return;
   if (upright.matches) turn();
   root.classList.toggle('free', on);
 }
@@ -190,12 +194,13 @@ function drawCard(i) {
   else if (!last) ex = '<div class="ex dim">No messages yet.</div>';
   else if (last.role === 'user') ex = `<div class="ex you">You: ${esc(firstSentence(last.text))}</div>`;
   else ex = `<div class="ex">${esc(preview(lastReply.text))}</div>`;
-  const html = `<div class="hd">${ICON[t.kind] || ICON.cowork}<span class="t">${esc(t.title)}</span>${status(t)}</div>${ex}`;
+  const html = `<div class="hd">${ICON[t.kind] || ICON.cowork}<span class="t">${esc(t.title)}</span>${status(t)}${EMBED ? '<button class="open" data-open>Open</button>' : ''}</div>${ex}`;
   if (c.dataset.html !== html) { c.innerHTML = html; c.dataset.html = html; }
 }
 
 /* ---------- tap to open, hold to talk ---------- */
-const Rec = window.SpeechRecognition || window.webkitSpeechRecognition;
+// Monodesk (Electron) has no speech service, so there holding a card just opens it.
+const Rec = EMBED ? null : window.SpeechRecognition || window.webkitSpeechRecognition;
 
 function dictate({ onText, onEnd }) {
   if (!Rec) return null;
@@ -233,6 +238,7 @@ function wireCard(card, i) {
   });
   card.addEventListener('pointercancel', () => { clearTimeout(timer); timer = null; if (holding && rec) rec.stop(); });
   card.addEventListener('contextmenu', (e) => e.preventDefault());
+  card.addEventListener('click', (e) => { if (e.target.closest('[data-open]') && slots[i]) openInMonodesk(slots[i]); });
   card.addEventListener('touchmove', (e) => { if (holding) e.preventDefault(); }, { passive: false });
 
   function show(html) { card.innerHTML = html; card.dataset.html = ''; }
@@ -286,9 +292,10 @@ function openThread(key, draft, listQuery) {
   pendingNew = null;
   opened = null;
   fromList = listQuery ?? null;
-  showView(`<div class="top"><button class="back" aria-label="Back">‹</button><span class="hdk"></span><span class="t"></span><span class="st"></span></div>
+  showView(`<div class="top"><button class="back" aria-label="Back">‹</button><span class="hdk"></span><span class="t"></span><span class="st"></span>${EMBED ? '<button class="openbtn" data-open>Open</button>' : ''}</div>
     <div class="body"></div>${composerHTML()}`);
   $('.back', view).onclick = closeThread;
+  if (EMBED) $('[data-open]', view).onclick = () => openInMonodesk(openKey);
   wireComposer(draft, async (text) => {
     await api(`/api/threads/${encodeURIComponent(openKey)}/reply`, { text });
     poll(true);
@@ -304,6 +311,32 @@ async function loadOpened() {
     if (openKey === key && t) { opened = t; drawThread(); }
   } catch (e) { if (openKey === key) toast(e.message); }
 }
+
+/* ---------- inside Monodesk ---------- */
+// Open: the thread in Monodesk's own Co-work or Claude Code tab.
+function openInMonodesk(key) {
+  const [kind, id] = key.split(':');
+  const url = (threads.get(key) || opened)?.url || `https://claude.ai/${kind === 'code' ? 'code' : 'chat'}/${id}`;
+  toMonodesk({ type: 'open', kind, url });
+}
+
+// Monodesk's Run inbox triage: start a chat right here, then show it.
+async function startNow(kind, text, title) {
+  closeSheet();
+  openKey = null; pendingNew = null; fromList = null;
+  showView(`<div class="top"><button class="back" aria-label="Back">‹</button>${ICON[kind] || ICON.cowork}<span class="t">${esc(title || 'New chat')}</span></div>
+    <div class="body"><div class="m now">Starting…</div></div>`);
+  $('.back', view).onclick = closeThread;
+  try {
+    const r = await api('/api/new', { kind, text });
+    poll(true);
+    if (r.key) openThread(r.key);
+  } catch (e) { toast(e.message); }
+}
+if (EMBED) addEventListener('message', (e) => {
+  if (e.source !== parent || !e.data || e.data.to !== 'dispatch') return;
+  if (e.data.type === 'new' && e.data.text) startNow(e.data.kind || 'cowork', String(e.data.text), e.data.title);
+});
 
 /* ---------- every recent thread, searchable ---------- */
 let allThreads = [];

@@ -146,3 +146,14 @@ button { font: inherit; color: inherit; }
 
 .toast { position: absolute; left: 50%; top: 14px; transform: translateX(-50%); z-index: 20; background: var(--text); color: var(--bg); border-radius: 10px; padding: 7px 12px; font-size: 13px; font-weight: 500; max-width: 90%; animation: fade .2s ease; }
 .notice { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; color: var(--dim); padding: 24px; font-size: 14px; }
+
+/* Inside Monodesk's Home panel (?embed=monodesk): Monodesk's greys, a tighter fit, and an Open button on hover. */
+html.embed { --bg: #121212; --card: #1b1b1b; --line: #2a2a2a; --user: #262626; --gap: 6px; }
+html.embed #stage { padding: 6px; }
+html.embed .card { border-radius: 12px; padding: 10px 12px; }
+html.embed .ex { font-size: 15px; -webkit-line-clamp: 3; }
+html.embed .card .open, html.embed .openbtn { flex: none; height: 22px; padding: 0 9px; border-radius: 7px; border: 1px solid var(--line); background: var(--bg); color: var(--dim); font-size: 11.5px; font-weight: 600; }
+html.embed .card .open { opacity: 0; transition: opacity .12s ease; }
+html.embed .card:hover .open { opacity: 1; }
+html.embed .card .open:hover, html.embed .openbtn:hover { color: var(--text); border-color: var(--dim); }
+html.embed .openbtn { height: 30px; padding: 0 12px; font-size: 12.5px; }
