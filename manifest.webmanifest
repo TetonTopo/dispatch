@@ -1,0 +1,10 @@
+{
+  "name": "Dispatch",
+  "short_name": "Dispatch",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "landscape",
+  "background_color": "#1f1e1d",
+  "theme_color": "#1f1e1d",
+  "icons": [{ "src": "icon.png", "sizes": "512x512", "type": "image/png" }]
+}

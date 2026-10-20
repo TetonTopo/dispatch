@@ -1,0 +1,368 @@
+// Dispatch: your three most recent Claude threads (Co-work or Claude Code) and a new-chat corner, in landscape.
+// Tap a card to open the whole thread. Hold a card to talk: it lights up, and when you let go your words are sent.
+const $ = (s, el = document) => el.querySelector(s);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const stage = $('#stage');
+const grid = $('#grid');
+const view = $('#thread');
+const SLOTS = 3;
+const POLL = 4000;
+const HOLD_MS = 350;
+const SEND_DELAY = 1800;
+
+const ICON = {
+  cowork: '<svg class="k" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l1.8 6.2L20 10l-6.2 1.8L12 18l-1.8-6.2L4 10l6.2-1.8z"/></svg>',
+  code: '<svg class="k code" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17l6-5-6-5M12 19h8"/></svg>',
+  mic: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0014 0M12 18v3"/></svg>',
+  send: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>',
+};
+
+/* ---------- API ---------- */
+// ?demo shows made-up threads, for trying the layout without Claude.
+const DEMO = new URLSearchParams(location.search).has('demo') && [
+  { key: 'cowork:a', kind: 'cowork', title: 'Trailer pivot deck notes', updated: Date.now() - 120e3, busy: true, messages: [{ role: 'assistant', text: 'Here is a tighter version of slide 4. It leads with the trailer and keeps one idea per line.\n\n- **One line** per idea\n- Lead with the trailer' }, { role: 'user', text: 'Great, apply it to slides 5 and 6 too.' }] },
+  { key: 'code:b', kind: 'code', title: 'monodesk: phone bridge', updated: Date.now() - 900e3, busy: false, messages: [{ role: 'user', text: 'Add a /api/threads endpoint' }, { role: 'assistant', text: 'Done, it lives in `bridge.js` and returns the four newest threads. I also added a demo mode.\n\n```js\nserver.listen(47800)\n```' }] },
+  { key: 'cowork:c', kind: 'cowork', title: 'Inbox triage', updated: Date.now() - 4e6, busy: false, messages: [{ role: 'assistant', text: 'Three emails need you today! First, Sam wants to confirm Thursday.' }] },
+];
+async function api(path, body) {
+  if (DEMO) {
+    if (path === '/api/new') return { key: 'cowork:a' };
+    if (body) return { ok: true };
+    return path.startsWith('/api/environments') ? { envs: [{ id: 'env_a', label: 'project', where: 'My PC · C:\\Users\\me\\project' }, { id: 'env_b', label: 'Default', where: 'Anthropic cloud' }] } : { threads: DEMO };
+  }
+  const r = await fetch(path, body ? { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Monodesk': '1' }, body: JSON.stringify(body) } : { cache: 'no-store' });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || 'Monodesk didn’t answer');
+  return j;
+}
+
+/* ---------- text ---------- */
+// Light markdown: escape first, then a few safe patterns.
+function md(src) {
+  return String(src || '').split(/```/).map((part, i) => {
+    if (i % 2) return `<pre><code>${esc(part.replace(/^[^\n]*\n/, ''))}</code></pre>`;
+    return part.trim().split(/\n{2,}/).map((p) => {
+      const inline = (s) => esc(s)
+        .replace(/`([^`]+)`/g, '<code>$1</code>')
+        .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')
+        .replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+      const lines = p.split('\n');
+      if (lines.every((l) => /^\s*[-*•]\s/.test(l))) return `<ul>${lines.map((l) => `<li>${inline(l.replace(/^\s*[-*•]\s/, ''))}</li>`).join('')}</ul>`;
+      if (lines.every((l) => /^\s*\d+[.)]\s/.test(l))) return `<ol>${lines.map((l) => `<li>${inline(l.replace(/^\s*\d+[.)]\s/, ''))}</li>`).join('')}</ol>`;
+      const h = /^(#{1,3})\s+(.*)$/.exec(p);
+      if (h && lines.length === 1) return `<h3>${inline(h[2])}</h3>`;
+      return p ? `<p>${lines.map(inline).join('<br>')}</p>` : '';
+    }).join('');
+  }).join('');
+}
+
+// The first sentence, as plain text.
+function firstSentence(text) {
+  const plain = String(text || '')
+    .replace(/```[\s\S]*?(```|$)/g, ' ')
+    .replace(/^\s*(#{1,6}|>|[-*•]|\d+[.)])\s+/gm, '')
+    .replace(/[*_`]/g, '')
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const m = /^(.{1,240}?[.!?])(\s|$)/.exec(plain);
+  if (m) return m[1];
+  return plain.length > 180 ? plain.slice(0, 180).replace(/\s\S*$/, '') + '…' : plain;
+}
+
+const ago = (t) => {
+  const s = (Date.now() - t) / 1000;
+  if (!t || s < 0) return '';
+  if (s < 60) return 'now';
+  if (s < 3600) return Math.floor(s / 60) + 'm';
+  if (s < 86400) return Math.floor(s / 3600) + 'h';
+  return Math.floor(s / 86400) + 'd';
+};
+const status = (t) => (t.busy ? '<span class="dots"><i></i><i></i><i></i></span>' : `<span class="w">${ago(t.updated)}</span>`);
+
+/* ---------- the grid: three thread corners, the fourth starts a new chat ---------- */
+const slots = Array(SLOTS).fill(null); // thread keys
+const cards = [];
+let threads = new Map();
+let held = null; // slot index while talking or about to send
+
+for (let i = 0; i < SLOTS; i++) {
+  const c = document.createElement('section');
+  c.className = 'card empty';
+  grid.appendChild(c);
+  cards.push(c);
+  wireCard(c, i);
+}
+const newCard = document.createElement('section');
+newCard.className = 'card new';
+newCard.innerHTML = '<div class="plus">+</div><span>New chat</span>';
+newCard.addEventListener('click', pickKind);
+grid.appendChild(newCard);
+
+function placeThreads(list) {
+  threads = new Map(list.map((t) => [t.key, t]));
+  const keys = list.slice(0, SLOTS).map((t) => t.key);
+  const arriving = keys.filter((k) => !slots.includes(k));
+  for (let i = 0; i < SLOTS; i++) {
+    if (slots[i] && keys.includes(slots[i])) { drawCard(i); continue; }
+    if (held === i) continue; // never swap a card out from under your thumb
+    const incoming = arriving.shift() || null;
+    if (incoming === slots[i]) { drawCard(i); continue; }
+    swap(i, incoming);
+  }
+  if (openKey) drawThread();
+}
+
+function swap(i, key) {
+  const c = cards[i];
+  const had = !!slots[i];
+  slots[i] = key;
+  if (!had) { drawCard(i); return; }
+  c.classList.add('out');
+  setTimeout(() => { drawCard(i); setTimeout(() => c.classList.remove('out'), 30); }, 350);
+}
+
+function drawCard(i) {
+  const c = cards[i];
+  if (held === i) return; // the card is showing what you're saying
+  const t = threads.get(slots[i]);
+  if (!t) { c.className = 'card empty' + (c.classList.contains('out') ? ' out' : ''); c.innerHTML = ''; return; }
+  c.classList.remove('empty');
+  const last = t.messages.at(-1);
+  const lastReply = [...t.messages].reverse().find((m) => m.role === 'assistant');
+  let ex;
+  if (!last) ex = '<div class="ex dim">No messages yet.</div>';
+  else if (last.role === 'user') ex = `<div class="ex you">You: ${esc(firstSentence(last.text))}</div>${t.busy ? '<div class="ex dim">Claude is working…</div>' : ''}`;
+  else ex = `<div class="ex">${esc(firstSentence(lastReply.text))}</div>`;
+  const html = `<div class="hd">${ICON[t.kind] || ICON.cowork}<span class="t">${esc(t.title)}</span>${status(t)}</div>${ex}`;
+  if (c.dataset.html !== html) { c.innerHTML = html; c.dataset.html = html; }
+}
+
+/* ---------- tap to open, hold to talk ---------- */
+const Rec = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+function dictate({ onText, onEnd }) {
+  if (!Rec) return null;
+  const r = new Rec();
+  r.lang = navigator.language || 'en-US';
+  r.continuous = true;
+  r.interimResults = true;
+  let text = '', failed = null;
+  r.onresult = (e) => {
+    let fin = '', live = '';
+    for (const res of e.results) (res.isFinal ? (fin += res[0].transcript) : (live += res[0].transcript));
+    text = (fin + live).trim();
+    onText(text);
+  };
+  r.onerror = (e) => { if (e.error === 'not-allowed' || e.error === 'service-not-allowed') failed = 'Allow the microphone for Dispatch to talk.'; };
+  r.onend = () => onEnd(text, failed);
+  try { r.start(); } catch { return null; }
+  return r;
+}
+
+function wireCard(card, i) {
+  let timer = null, start = null, holding = false, rec = null, pendingSend = null;
+  card.addEventListener('pointerdown', (e) => {
+    if (!slots[i] || e.target.closest('button')) return;
+    start = { x: e.clientX, y: e.clientY };
+    holding = false;
+    timer = setTimeout(begin, HOLD_MS);
+  });
+  card.addEventListener('pointermove', (e) => {
+    if (timer && start && Math.hypot(e.clientX - start.x, e.clientY - start.y) > 12) { clearTimeout(timer); timer = null; start = null; }
+  });
+  card.addEventListener('pointerup', (e) => {
+    if (timer) { clearTimeout(timer); timer = null; if (start && !e.target.closest('button')) openThread(slots[i]); start = null; return; }
+    if (holding && rec) rec.stop();
+  });
+  card.addEventListener('pointercancel', () => { clearTimeout(timer); timer = null; if (holding && rec) rec.stop(); });
+  card.addEventListener('contextmenu', (e) => e.preventDefault());
+  card.addEventListener('touchmove', (e) => { if (holding) e.preventDefault(); }, { passive: false });
+
+  function show(html) { card.innerHTML = html; card.dataset.html = ''; }
+  function done() { held = null; holding = false; card.classList.remove('live'); drawCard(i); }
+
+  function begin() {
+    timer = null;
+    const key = slots[i];
+    if (!Rec) { start = null; return openThread(key); }
+    clearTimeout(pendingSend);
+    holding = true;
+    held = i;
+    const t = threads.get(key);
+    card.classList.add('live');
+    const head = `<div class="hd">${ICON[t?.kind] || ICON.cowork}<span class="t">${esc(t?.title || '')}</span></div>`;
+    show(`${head}<div class="ex dim">Listening… let go to send</div>`);
+    rec = dictate({
+      onText: (words) => show(`${head}<div class="ex">${esc(words)}</div>`),
+      onEnd: (words, err) => {
+        rec = null;
+        holding = false;
+        if (err) { done(); toast(err); return openThread(key); }
+        if (!words) return done();
+        // Still lit while it waits to send, so you can cancel or fix it.
+        show(`${head}<div class="ex">${esc(words)}</div><div class="bar"><span>Sending…</span><button data-edit>Edit</button><button data-cancel>Cancel</button></div>`);
+        $('[data-cancel]', card).onclick = () => { clearTimeout(pendingSend); done(); };
+        $('[data-edit]', card).onclick = () => { clearTimeout(pendingSend); done(); openThread(key, words); };
+        pendingSend = setTimeout(async () => {
+          done();
+          try { await api(`/api/threads/${encodeURIComponent(key)}/reply`, { text: words }); toast('Sent'); poll(true); } catch (e) { toast(e.message); openThread(key, words); }
+        }, SEND_DELAY);
+      },
+    });
+    if (!rec) { done(); openThread(key); }
+  }
+}
+
+/* ---------- full-screen thread with a composer ---------- */
+let openKey = null, pendingNew = null;
+
+function openThread(key, draft) {
+  openKey = key;
+  pendingNew = null;
+  view.hidden = false;
+  view.innerHTML = `<div class="top"><button class="back" aria-label="Back">‹</button><span class="hdk"></span><span class="t"></span><span class="st"></span></div>
+    <div class="body"></div>${composerHTML()}`;
+  $('.back', view).onclick = closeThread;
+  wireComposer(draft, async (text) => {
+    await api(`/api/threads/${encodeURIComponent(openKey)}/reply`, { text });
+    poll(true);
+  });
+  drawThread(true);
+}
+
+// A brand-new thread: the same screen, empty until the first message goes.
+function openNew(kind, env, label) {
+  openKey = null;
+  pendingNew = { kind, env };
+  view.hidden = false;
+  view.innerHTML = `<div class="top"><button class="back" aria-label="Back">‹</button>${ICON[kind]}<span class="t">${kind === 'code' ? 'New Claude Code session' + (label ? ' · ' + esc(label) : '') : 'New Co-work chat'}</span></div>
+    <div class="body"></div>${composerHTML()}`;
+  $('.back', view).onclick = closeThread;
+  wireComposer('', async (text) => {
+    const r = await api('/api/new', { kind, text, env });
+    toast('Started');
+    poll(true);
+    if (r.key) openThread(r.key);
+  });
+}
+
+function closeThread() { openKey = null; pendingNew = null; view.hidden = true; view.innerHTML = ''; }
+
+function drawThread(fresh) {
+  if (!openKey || view.hidden) return;
+  const t = threads.get(openKey);
+  const body = $('.body', view);
+  if (!t) { if (fresh) body.innerHTML = '<div class="m assistant"><p style="color:var(--faint)">Starting…</p></div>'; return; }
+  $('.hdk', view).innerHTML = ICON[t.kind] || ICON.cowork;
+  $('.top .t', view).textContent = t.title;
+  $('.st', view).innerHTML = status(t);
+  const html = t.messages.map((m) => `<div class="m ${m.role}">${m.role === 'user' ? esc(m.text) : md(m.text)}</div>`).join('') || '<div class="m assistant"><p style="color:var(--faint)">No messages yet.</p></div>';
+  if (body.dataset.html === html) return;
+  const nearBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 60;
+  body.innerHTML = html;
+  body.dataset.html = html;
+  if (fresh || nearBottom) body.scrollTop = body.scrollHeight;
+}
+
+function composerHTML() {
+  return `<div class="compose"><textarea rows="1" placeholder="Message Claude" enterkeyhint="send"></textarea>
+    ${Rec ? `<button class="icbtn" data-mic aria-label="Dictate">${ICON.mic}</button>` : ''}<button class="icbtn send" data-send aria-label="Send">${ICON.send}</button></div>`;
+}
+
+function wireComposer(initial, onSend) {
+  const ta = $('textarea', view), send = $('[data-send]', view), mic = $('[data-mic]', view);
+  const grow = () => { ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight, 140) + 'px'; send.disabled = !ta.value.trim(); };
+  ta.value = initial || '';
+  ta.addEventListener('input', grow);
+  grow();
+  if (initial || pendingNew) setTimeout(() => ta.focus(), 60);
+  const go = async () => {
+    const text = ta.value.trim();
+    if (!text) return;
+    send.disabled = true;
+    try { await onSend(text); ta.value = ''; grow(); } catch (e) { toast(e.message); send.disabled = false; }
+  };
+  send.onclick = go;
+  // A hardware keyboard's Enter sends; Shift+Enter makes a new line.
+  ta.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && matchMedia('(hover: hover)').matches) { e.preventDefault(); go(); } });
+  if (mic) {
+    let rec = null, base = '';
+    mic.onclick = () => {
+      if (rec) return rec.stop();
+      base = ta.value ? ta.value.replace(/\s*$/, ' ') : '';
+      mic.classList.add('on');
+      rec = dictate({ onText: (t) => { ta.value = base + t; grow(); }, onEnd: (_t, err) => { rec = null; mic.classList.remove('on'); if (err) toast(err); } });
+      if (!rec) mic.classList.remove('on');
+    };
+  }
+}
+
+/* ---------- new chat: Co-work or Code, then where ---------- */
+function sheet(html) {
+  closeSheet();
+  $('#layer').innerHTML = `<div class="ov" data-ov><div class="sheet">${html}</div></div>`;
+  $('[data-ov]').addEventListener('pointerdown', (e) => { if (e.target.matches('[data-ov]')) closeSheet(); });
+  return $('.sheet');
+}
+function closeSheet() { $('#layer').innerHTML = ''; }
+
+function pickKind() {
+  const sh = sheet(`<h2>New chat</h2><div class="choices">
+    <button class="choice" data-kind="cowork">${ICON.cowork}<span>Co-work<small>A regular Claude chat</small></span></button>
+    <button class="choice" data-kind="code">${ICON.code}<span>Claude Code<small>A coding session in an environment</small></span></button></div>`);
+  sh.querySelectorAll('[data-kind]').forEach((b) => b.addEventListener('click', () => {
+    if (b.dataset.kind === 'code') return pickEnv();
+    closeSheet();
+    openNew('cowork');
+  }));
+}
+
+async function pickEnv() {
+  const sh = sheet('<h2>Which environment?</h2><div class="choices" id="envs"><div class="choice" style="color:var(--faint)">Loading…</div></div>');
+  let envs = [];
+  try { ({ envs } = await api('/api/environments')); } catch (e) { toast(e.message); }
+  const box = $('#envs', sh);
+  if (!box) return;
+  box.innerHTML = envs.length
+    ? envs.map((e) => `<button class="choice" data-env="${esc(e.id)}" data-label="${esc(e.label)}">${ICON.code}<span>${esc(e.label)}<small>${esc(e.where)}</small></span></button>`).join('')
+    : '<div class="choice" style="color:var(--faint)">No environments found. Set one up in Claude Code on the computer.</div>';
+  box.querySelectorAll('[data-env]').forEach((b) => b.addEventListener('click', () => { closeSheet(); openNew('code', b.dataset.env, b.dataset.label); }));
+}
+
+/* ---------- polling ---------- */
+let pollTimer, inFlight = false;
+async function poll(now) {
+  clearTimeout(pollTimer);
+  if (inFlight) { pollTimer = setTimeout(poll, 800); return; }
+  inFlight = true;
+  let r;
+  try { r = await api('/api/threads' + (now ? '?now=1' : '')); } catch {}
+  if (!r) notice('Can’t reach Monodesk. Is it running on your computer, with Tailscale on here?');
+  else if (r.error === 'signed-out') notice('Sign in to Claude in Monodesk on your computer, then come back.');
+  else if (r.error && !(r.threads || []).length) notice('Monodesk can’t read Claude right now (' + r.error + ').');
+  else { clearNotice(); placeThreads(r.threads || []); }
+  inFlight = false;
+  if (!document.hidden) pollTimer = setTimeout(poll, POLL);
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden) poll(); });
+
+function notice(msg) {
+  let n = $('.notice', stage);
+  if (!n) { grid.style.visibility = 'hidden'; n = document.createElement('div'); n.className = 'notice'; stage.appendChild(n); }
+  n.textContent = msg;
+}
+function clearNotice() { $('.notice', stage)?.remove(); grid.style.visibility = ''; }
+
+let toastTimer;
+function toast(msg) {
+  $('.toast', stage)?.remove();
+  const t = document.createElement('div');
+  t.className = 'toast';
+  t.textContent = msg;
+  stage.appendChild(t);
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.remove(), 2400);
+}
+
+poll();
