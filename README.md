@@ -4,6 +4,7 @@ Your Claude chats on the iPhone home screen. The three most recent Claude thread
 
 - **Tap** a card to open the whole thread and reply. Full-screen pages follow the phone, so you can read them upright or sideways.
 - **Hold** a card to dictate. The card turns orange; let go, and it sends after 1.8 s unless you press **Edit** or **Cancel**.
+- **Speaker** (on a card, or at the top of a thread) reads Claude's latest reply aloud, skipping code; tap it again to stop. The sliders button next to it picks the voice and speed (kept on that device). For much better iPhone voices, download a **Premium** or **Enhanced** voice in Settings → Accessibility → Spoken Content → Voices → English.
 - **New chat** starts a Co-work chat or a Claude Code session (pick the environment), always on Opus 5.5.
 - **All threads** lists your recent chats and Code sessions, with search. Tap one to open it.
 - Add `?demo` to the address to see it with made-up data.

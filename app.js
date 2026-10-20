@@ -37,6 +37,9 @@ const ICON = {
   search: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>',
   mic: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0014 0M12 18v3"/></svg>',
   send: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>',
+  speak: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/><path d="M15.5 9a4 4 0 010 6M18 6.5a7.5 7.5 0 010 11"/></svg>',
+  stop: '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="7" y="7" width="10" height="10" rx="2"/></svg>',
+  voice: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>',
 };
 
 /* ---------- API ---------- */
@@ -194,7 +197,7 @@ function drawCard(i) {
   else if (!last) ex = '<div class="ex dim">No messages yet.</div>';
   else if (last.role === 'user') ex = `<div class="ex you">You: ${esc(firstSentence(last.text))}</div>`;
   else ex = `<div class="ex">${esc(preview(lastReply.text))}</div>`;
-  const html = `<div class="hd">${ICON[t.kind] || ICON.cowork}<span class="t">${esc(t.title)}</span>${status(t)}${EMBED ? '<button class="open" data-open>Open</button>' : ''}</div>${ex}`;
+  const html = `<div class="hd">${ICON[t.kind] || ICON.cowork}<span class="t">${esc(t.title)}</span>${status(t)}${lastReply && !t.busy ? sayButton(t.key) : ''}${EMBED ? '<button class="open" data-open>Open</button>' : ''}</div>${ex}`;
   if (c.dataset.html !== html) { c.innerHTML = html; c.dataset.html = html; }
 }
 
@@ -238,7 +241,10 @@ function wireCard(card, i) {
   });
   card.addEventListener('pointercancel', () => { clearTimeout(timer); timer = null; if (holding && rec) rec.stop(); });
   card.addEventListener('contextmenu', (e) => e.preventDefault());
-  card.addEventListener('click', (e) => { if (e.target.closest('[data-open]') && slots[i]) openInMonodesk(slots[i]); });
+  card.addEventListener('click', (e) => {
+    if (e.target.closest('[data-open]') && slots[i]) openInMonodesk(slots[i]);
+    if (e.target.closest('[data-say]') && slots[i]) readAloud(slots[i]);
+  });
   card.addEventListener('touchmove', (e) => { if (holding) e.preventDefault(); }, { passive: false });
 
   function show(html) { card.innerHTML = html; card.dataset.html = ''; }
@@ -248,6 +254,7 @@ function wireCard(card, i) {
     timer = null;
     const key = slots[i];
     if (!Rec) { start = null; return openThread(key); }
+    hush(); // the mic shouldn't hear Claude
     clearTimeout(pendingSend);
     holding = true;
     held = i;
@@ -292,10 +299,14 @@ function openThread(key, draft, listQuery) {
   pendingNew = null;
   opened = null;
   fromList = listQuery ?? null;
-  showView(`<div class="top"><button class="back" aria-label="Back">‹</button><span class="hdk"></span><span class="t"></span><span class="st"></span>${EMBED ? '<button class="openbtn" data-open>Open</button>' : ''}</div>
+  showView(`<div class="top"><button class="back" aria-label="Back">‹</button><span class="hdk"></span><span class="t"></span><span class="st"></span>${synth ? `<span class="saybox"></span><button class="tbtn" data-voice aria-label="Pick a voice">${ICON.voice}</button>` : ''}${EMBED ? '<button class="openbtn" data-open>Open</button>' : ''}</div>
     <div class="body"></div>${composerHTML()}`);
   $('.back', view).onclick = closeThread;
   if (EMBED) $('[data-open]', view).onclick = () => openInMonodesk(openKey);
+  if (synth) {
+    $('.saybox', view).onclick = (e) => { if (e.target.closest('[data-say]')) readAloud(openKey); };
+    $('[data-voice]', view).onclick = pickVoice;
+  }
   wireComposer(draft, async (text) => {
     await api(`/api/threads/${encodeURIComponent(openKey)}/reply`, { text });
     poll(true);
@@ -398,6 +409,7 @@ function drawThread(fresh) {
   $('.hdk', view).innerHTML = ICON[t.kind] || ICON.cowork;
   $('.top .t', view).textContent = t.title;
   $('.st', view).innerHTML = status(t);
+  drawThreadSay(t);
   const html = (t.messages.map((m) => `<div class="m ${m.role}">${m.role === 'user' ? esc(m.text) : md(m.text)}</div>`).join('') || '<div class="m assistant"><p style="color:var(--faint)">No messages yet.</p></div>')
     + (t.busy ? `<div class="m now">${working(t)}</div>` : '');
   if (body.dataset.html === html) return;
@@ -432,7 +444,8 @@ function wireComposer(initial, onSend) {
     let rec = null, base = '';
     mic.onclick = () => {
       if (rec) return rec.stop();
-      base = ta.value ? ta.value.replace(/\s*$/, ' ') : '';
+      hush();
+      base =ta.value ? ta.value.replace(/\s*$/, ' ') : '';
       mic.classList.add('on');
       rec = dictate({ onText: (t) => { ta.value = base + t; grow(); }, onEnd: (_t, err) => { rec = null; mic.classList.remove('on'); if (err) toast(err); } });
       if (!rec) mic.classList.remove('on');
@@ -470,6 +483,181 @@ async function pickEnv() {
     ? envs.map((e) => `<button class="choice" data-env="${esc(e.id)}" data-label="${esc(e.label)}">${ICON.code}<span>${esc(e.label)}<small>${esc(e.where)}</small></span></button>`).join('')
     : '<div class="choice" style="color:var(--faint)">No environments found. Set one up in Claude Code on the computer.</div>';
   box.querySelectorAll('[data-env]').forEach((b) => b.addEventListener('click', () => { closeSheet(); openNew('code', b.dataset.env, b.dataset.label); }));
+}
+
+/* ---------- read aloud ---------- */
+// The speaker reads Claude's latest reply in one of the device's own voices (speechSynthesis: iOS voices on the
+// iPhone, Windows voices in Monodesk). iOS only lets a page talk in answer to a tap, so speech always starts inside
+// a click handler, with every piece queued right there. Tap again to stop.
+const synth = window.speechSynthesis && window.SpeechSynthesisUtterance ? speechSynthesis : null;
+const store = {
+  get: (k) => { try { return localStorage.getItem('dispatch.' + k); } catch { return null; } },
+  set: (k, v) => { try { v == null ? localStorage.removeItem('dispatch.' + k) : localStorage.setItem('dispatch.' + k, v); } catch {} },
+};
+let saying = null; // the thread key being read
+let voices = [];
+const loadVoices = () => (voices = synth ? synth.getVoices() : []);
+if (synth) {
+  synth.cancel(); // a reload (Monodesk live-reloads) shouldn't leave the last reply talking
+  loadVoices();
+  synth.onvoiceschanged = () => { loadVoices(); drawVoices(); };
+}
+const myVoice = () => { const uri = store.get('voice'); return (uri && (voices.length ? voices : loadVoices()).find((v) => v.voiceURI === uri)) || null; };
+const myRate = () => +store.get('rate') || 1;
+
+const sayButton = (key) => `<button class="say${saying === key ? ' on' : ''}" data-say aria-label="${saying === key ? 'Stop reading' : 'Read aloud'}">${saying === key ? ICON.stop : ICON.speak}</button>`;
+function drawThreadSay(t) {
+  const box = $('.saybox', view);
+  if (!box) return;
+  const html = t && t.messages.some((m) => m.role === 'assistant') ? sayButton(t.key) : '';
+  if (box.innerHTML !== html) box.innerHTML = html;
+}
+function drawSay() {
+  for (let i = 0; i < SLOTS; i++) drawCard(i);
+  if (openKey && !view.hidden) drawThreadSay(threads.get(openKey) || opened);
+}
+
+// Claude's latest reply: everything it said since your last message (or its last message, if you've spoken since).
+function latestReply(t) {
+  const msgs = t?.messages || [];
+  const lastYou = msgs.map((m) => m.role).lastIndexOf('user');
+  const after = msgs.slice(lastYou + 1).filter((m) => m.role === 'assistant');
+  return (after.length ? after : [...msgs].reverse().filter((m) => m.role === 'assistant').slice(0, 1)).map((m) => m.text).join('\n\n');
+}
+
+// Markdown → what a person would say: no code blocks, no symbols, links by their words, a pause after each line.
+function spoken(src) {
+  return String(src || '')
+    .replace(/```[\s\S]*?(```|$)/g, '\n')
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l && !/^\|?\s*:?-{3,}/.test(l) && !/^([-*_]\s*){3,}$/.test(l)) // table rules, horizontal rules
+    .map((l) => l
+      .replace(/^(#{1,6}|>+|[-*+•]|\d+[.)])\s+/, '')
+      .replace(/^\||\|$/g, '').replace(/\s*\|\s*/g, ', ')
+      .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
+      .replace(/<?https?:\/\/(www\.)?([^\/\s>]+)[^\s>]*>?/g, '$2')
+      .replace(/`([^`]*)`/g, '$1')
+      .replace(/(\*\*|__|~~)(.+?)\1/g, '$2')
+      .replace(/(^|[\s(])[*_]([^*_\s][^*_]*?)[*_](?=[\s).,;:!?]|$)/g, '$1$2')
+      .replace(/\s*(→|->|⇒)\s*/g, ' to ')
+      .replace(/\s+[·•]\s+/g, ', ')
+      .replace(/<[^>]+>/g, '')
+      .replace(/\s+/g, ' ')
+      .trim())
+    .filter(Boolean)
+    .map((l) => (/[.!?:;,]$/.test(l) ? l : l + '.'))
+    .join('\n');
+}
+
+// Short pieces, a sentence or a few: long utterances get cut off in some browsers, and short ones stop at once.
+function pieces(text) {
+  const out = [];
+  for (const line of text.split('\n')) {
+    let cur = '';
+    for (const s of line.split(/(?<=[.!?;:])\s+/)) {
+      if (cur && (cur + ' ' + s).length > 220) { out.push(cur); cur = ''; }
+      cur = cur ? cur + ' ' + s : s;
+    }
+    if (cur) out.push(cur);
+  }
+  return out.flatMap((p) => (p.length <= 260 ? [p] : p.match(/.{1,220}(\s|$)|\S+/g))).map((p) => p.trim()).filter(Boolean);
+}
+
+// Speak text now (call from a tap). onDone runs once, when it finishes or is stopped.
+let run = 0, queued = [], watch = null;
+function speak(text, { voice = myVoice(), rate = myRate(), onDone } = {}) {
+  const me = ++run;
+  synth.cancel();
+  clearInterval(watch);
+  let over = false;
+  const finish = () => { if (over || me !== run) return; over = true; clearInterval(watch); queued = []; onDone?.(); };
+  const lang = voice?.lang || navigator.language || 'en-US';
+  queued = pieces(text).map((p) => {
+    const u = new SpeechSynthesisUtterance(p);
+    if (voice) u.voice = voice;
+    u.lang = lang;
+    u.rate = rate;
+    return u; // kept in queued: Safari drops events for utterances it has garbage-collected
+  });
+  if (!queued.length) return finish();
+  queued.at(-1).onend = finish;
+  queued.forEach((u) => (u.onerror = (e) => { if (e.error !== 'interrupted' && e.error !== 'canceled') finish(); }));
+  synth.resume(); // Chrome can be stuck paused
+  queued.forEach((u) => synth.speak(u));
+  // Some engines never send the last "end"; if nothing is speaking or queued for a while, it's over.
+  let quiet = 0, t0 = Date.now();
+  watch = setInterval(() => {
+    if (me !== run) return clearInterval(watch);
+    quiet = synth.speaking || synth.pending ? 0 : quiet + 1;
+    if (quiet >= 3 && Date.now() - t0 > 1500) finish();
+  }, 500);
+}
+
+function readAloud(key) {
+  if (!synth) return toast('This browser can’t read aloud.');
+  if (saying === key) return hush();
+  const t = threads.get(key) || (opened?.key === key ? opened : null);
+  const text = spoken(latestReply(t));
+  if (!text) return toast('Nothing to read yet.');
+  saying = key;
+  speak(text, { onDone: () => { if (saying === key) { saying = null; drawSay(); } } });
+  drawSay();
+}
+function hush() {
+  if (!synth) return;
+  run++;
+  clearInterval(watch);
+  synth.cancel();
+  if (saying) { saying = null; drawSay(); }
+}
+
+/* ---------- voice picker (temporary, to choose a voice on the real phone) ---------- */
+const SAMPLE = 'Done. I pushed the fix to the dispatch repo, and the cards now read aloud. Want me to bump the Monodesk version too?';
+// Apple's joke voices, kept out of the list unless "Show all" is on.
+const NOVELTY = /^(Albert|Bad News|Bahh|Bells|Boing|Bubbles|Cellos|Deranged|Good News|Hysterical|Jester|Organ|Pipe Organ|Superstar|Trinoids|Whisper|Wobble|Zarvox|Fred|Junior|Kathy|Ralph|Princess|Grandma|Grandpa|Rocko|Shelley|Flo|Eddy|Reed|Sandy)\b/;
+const quality = (v) => (/premium/i.test(v.voiceURI + v.name) ? 'Premium' : /enhanced/i.test(v.voiceURI + v.name) ? 'Enhanced' : /natural|neural/i.test(v.name) ? 'Natural' : v.localService === false ? 'Online' : '');
+const RANK = { Premium: 0, Natural: 1, Enhanced: 2, Online: 3, '': 4 };
+
+function pickVoice() {
+  if (!synth) return toast('This browser can’t read aloud.');
+  hush();
+  loadVoices();
+  const sh = sheet(`<h2>Voice <small>Tap one to hear it. The last one you tap is used.</small></h2>
+    <div class="vctl"><label>Speed <input type="range" min="0.6" max="1.6" step="0.05" data-rate></label><b data-ratev></b>
+      <label class="chk"><input type="checkbox" data-all> Show all</label></div>
+    <div class="voices"></div>`);
+  const rate = $('[data-rate]', sh), all = $('[data-all]', sh);
+  rate.value = myRate();
+  $('[data-ratev]', sh).textContent = myRate().toFixed(2) + '×';
+  rate.oninput = () => { store.set('rate', rate.value); $('[data-ratev]', sh).textContent = (+rate.value).toFixed(2) + '×'; };
+  rate.onchange = () => speak(SAMPLE);
+  all.onchange = drawVoices;
+  $('.voices', sh).onclick = (e) => {
+    const b = e.target.closest('[data-uri]');
+    if (!b) return;
+    store.set('voice', b.dataset.uri || null);
+    speak(SAMPLE);
+    drawVoices();
+  };
+  drawVoices();
+}
+
+function drawVoices() {
+  const box = $('#layer .voices');
+  if (!box) return;
+  const showAll = $('#layer [data-all]')?.checked;
+  const mine = (navigator.language || 'en').slice(0, 2).toLowerCase();
+  const seen = new Set();
+  const list = voices
+    .filter((v) => !seen.has(v.voiceURI) && seen.add(v.voiceURI))
+    .filter((v) => showAll || (v.lang.slice(0, 2).toLowerCase() === mine && !NOVELTY.test(v.name)))
+    .sort((a, b) => RANK[quality(a)] - RANK[quality(b)] || (b.lang.slice(0, 2).toLowerCase() === mine) - (a.lang.slice(0, 2).toLowerCase() === mine) || a.name.localeCompare(b.name));
+  const cur = myVoice()?.voiceURI || '';
+  const row = (uri, name, sub, q) => `<button class="vrow${uri === cur ? ' on' : ''}" data-uri="${esc(uri)}"><span>${esc(name)}<small>${esc(sub)}</small></span>${q ? `<em>${q}</em>` : ''}</button>`;
+  box.innerHTML = row('', 'Default', 'The device’s own choice', '')
+    + list.map((v) => row(v.voiceURI, v.name.replace(/^Microsoft\s+/, '').replace(/\s+-\s+.*$/, '').replace(/\s*\((Premium|Enhanced)\)/i, ''), v.lang, quality(v))).join('')
+    + (list.length ? '' : `<div class="none">${voices.length ? 'No voices in your language. Turn on Show all.' : 'No voices yet…'}</div>`);
 }
 
 /* ---------- polling ---------- */
