@@ -91,6 +91,36 @@ function firstSentence(text) {
   return plain.length > 180 ? plain.slice(0, 180).replace(/\s\S*$/, '') + '…' : plain;
 }
 
+// The card's one line from Claude's reply: what's needed from you next.
+// Claude ends with the next step, so look in the last two paragraphs for a sentence aimed at you
+// ("Let me know…", "Want me to…", "…if you want", a question); otherwise the last real sentence.
+const ASK = /\?$|^(let me know|tell me|once you|when you|if you|want me|should i|shall i|do you|can you|could you|would you|say the word|reply|pick|choose|send me|paste|check|try|open|sign in|run)\b|\b(if you want|if you'd like|your call|needs? (you|your)|your ok|confirm|up to you|let me know)\b/i;
+function sentences(par) {
+  const plain = par
+    .replace(/^\s*(#{1,6}|>|[-*•]|\d+[.)])\s+/gm, '')
+    .replace(/[*_`]/g, '')
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .replace(/\s+/g, ' ')
+    .trim();
+  // Split after . ! ? only when a new sentence starts, so "config.js" or "v0.2.0" stay whole.
+  return plain.split(/(?<=[.!?])\s+(?=["“(\[A-Z0-9])/).map((s) => s.trim()).filter(Boolean);
+}
+function preview(text) {
+  const pars = String(text || '')
+    .replace(/```[\s\S]*?(```|$)/g, '\n\n')
+    .split(/\n{2,}/)
+    .map((p) => p.trim())
+    .filter((p) => p && !/^\|/.test(p) && !/^#{1,6}\s/.test(p));
+  const tail = pars.slice(-2).flatMap(sentences);
+  const real = (s) => !/:$/.test(s) && s.split(/\s+/).length >= 5;
+  const pick = [...tail].reverse().find((s) => real(s) && ASK.test(s))
+    || [...sentences(pars.at(-1) || '')].reverse().find(real)
+    || firstSentence(text);
+  return pick.length > 220 ? pick.slice(0, 220).replace(/\s\S*$/, '') + '…' : pick;
+}
+// "Search Notion" → "Search Notion…"
+const working = (t) => esc(String(t.status || 'Claude is working').replace(/[.…\s]+$/, '')) + '…';
+
 const ago = (t) => {
   const s = (Date.now() - t) / 1000;
   if (!t || s < 0) return '';
@@ -153,10 +183,13 @@ function drawCard(i) {
   c.classList.remove('empty');
   const last = t.messages.at(-1);
   const lastReply = [...t.messages].reverse().find((m) => m.role === 'assistant');
+  const lastYou = [...t.messages].reverse().find((m) => m.role === 'user');
   let ex;
-  if (!last) ex = '<div class="ex dim">No messages yet.</div>';
-  else if (last.role === 'user') ex = `<div class="ex you">You: ${esc(firstSentence(last.text))}</div>${t.busy ? '<div class="ex dim">Claude is working…</div>' : ''}`;
-  else ex = `<div class="ex">${esc(firstSentence(lastReply.text))}</div>`;
+  // While Claude works: what you asked, then what it's doing right now (the line claude.ai shows in grey).
+  if (t.busy) ex = `${lastYou ? `<div class="ex you">You: ${esc(firstSentence(lastYou.text))}</div>` : ''}<div class="ex dim">${working(t)}</div>`;
+  else if (!last) ex = '<div class="ex dim">No messages yet.</div>';
+  else if (last.role === 'user') ex = `<div class="ex you">You: ${esc(firstSentence(last.text))}</div>`;
+  else ex = `<div class="ex">${esc(preview(lastReply.text))}</div>`;
   const html = `<div class="hd">${ICON[t.kind] || ICON.cowork}<span class="t">${esc(t.title)}</span>${status(t)}</div>${ex}`;
   if (c.dataset.html !== html) { c.innerHTML = html; c.dataset.html = html; }
 }
@@ -332,7 +365,8 @@ function drawThread(fresh) {
   $('.hdk', view).innerHTML = ICON[t.kind] || ICON.cowork;
   $('.top .t', view).textContent = t.title;
   $('.st', view).innerHTML = status(t);
-  const html = t.messages.map((m) => `<div class="m ${m.role}">${m.role === 'user' ? esc(m.text) : md(m.text)}</div>`).join('') || '<div class="m assistant"><p style="color:var(--faint)">No messages yet.</p></div>';
+  const html = (t.messages.map((m) => `<div class="m ${m.role}">${m.role === 'user' ? esc(m.text) : md(m.text)}</div>`).join('') || '<div class="m assistant"><p style="color:var(--faint)">No messages yet.</p></div>')
+    + (t.busy ? `<div class="m now">${working(t)}</div>` : '');
   if (body.dataset.html === html) return;
   const nearBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 60;
   body.innerHTML = html;

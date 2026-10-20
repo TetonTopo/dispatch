@@ -94,6 +94,8 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); c
 .m { margin: 8px 0; max-width: 760px; }
 .m.user { margin-left: auto; width: fit-content; max-width: 80%; background: var(--user); border-radius: 14px; padding: 7px 11px; font-size: 14.5px; line-height: 1.4; white-space: pre-wrap; word-wrap: break-word; }
 .m.assistant { font-family: var(--serif); font-size: 15px; line-height: 1.45; word-wrap: break-word; }
+/* What Claude is doing right now, under the last message. */
+.m.now { color: var(--faint); font-size: 13px; font-style: italic; }
 .m.assistant p { margin: 0 0 .6em; }
 .m.assistant p:last-child { margin-bottom: 0; }
 .m.assistant ul, .m.assistant ol { margin: 0 0 .6em; padding-left: 1.3em; }
