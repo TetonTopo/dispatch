@@ -12,19 +12,22 @@
   --sans: -apple-system, system-ui, "Segoe UI", sans-serif;
   --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   --gap: 8px;
+  /* The visible window. app.js sets these from innerWidth/innerHeight; 100vh on iOS includes space under the toolbars. */
+  --vw: 100dvw;
+  --vh: 100dvh;
 }
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--text); font: 15px/1.45 var(--sans); overscroll-behavior: none; }
 
 /* The stage is the landscape screen. Held sideways it simply fills the window. */
 #stage {
-  position: fixed; inset: 0; overflow: hidden;
+  position: fixed; top: 0; left: 0; width: var(--vw); height: var(--vh); overflow: hidden;
   padding: calc(env(safe-area-inset-top) + 8px) calc(env(safe-area-inset-right) + 8px) calc(env(safe-area-inset-bottom) + 8px) calc(env(safe-area-inset-left) + 8px);
 }
 /* Upright (or rotation-locked): turn the stage a quarter clockwise so it still reads landscape. */
 @media (orientation: portrait) {
   #stage {
-    inset: auto; top: 0; left: 100vw; width: 100vh; height: 100vw;
+    left: var(--vw); width: var(--vh); height: var(--vw);
     transform-origin: top left; transform: rotate(90deg);
     padding: calc(env(safe-area-inset-right) + 8px) calc(env(safe-area-inset-bottom) + 8px) calc(env(safe-area-inset-left) + 8px) calc(env(safe-area-inset-top) + 8px);
   }

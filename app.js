@@ -10,6 +10,15 @@ const POLL = 4000;
 const HOLD_MS = 350;
 const SEND_DELAY = 1800;
 
+// Size the stage to the window you can actually see, so the 2×2 is four even quarters on every iPhone.
+function fit() {
+  document.documentElement.style.setProperty('--vw', innerWidth + 'px');
+  document.documentElement.style.setProperty('--vh', innerHeight + 'px');
+}
+fit();
+addEventListener('resize', fit);
+addEventListener('orientationchange', () => setTimeout(fit, 300));
+
 const ICON = {
   cowork: '<svg class="k" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l1.8 6.2L20 10l-6.2 1.8L12 18l-1.8-6.2L4 10l6.2-1.8z"/></svg>',
   code: '<svg class="k code" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17l6-5-6-5M12 19h8"/></svg>',
