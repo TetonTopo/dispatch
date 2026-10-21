@@ -299,11 +299,11 @@ function openThread(key, draft, listQuery) {
   pendingNew = null;
   opened = null;
   fromList = listQuery ?? null;
-  showView(`<div class="top"><button class="back" aria-label="Back">‹</button><span class="hdk"></span><span class="t"></span><span class="st"></span>${synth ? `<span class="saybox"></span><button class="tbtn" data-voice aria-label="Pick a voice">${ICON.voice}</button>` : ''}${EMBED ? '<button class="openbtn" data-open>Open</button>' : ''}</div>
+  showView(`<div class="top"><button class="back" aria-label="Back">‹</button><span class="hdk"></span><span class="t"></span><span class="st"></span>${synth || xi?.enabled ? `<span class="saybox"></span><button class="tbtn" data-voice aria-label="Pick a voice">${ICON.voice}</button>` : ''}${EMBED ? '<button class="openbtn" data-open>Open</button>' : ''}</div>
     <div class="body"></div>${composerHTML()}`);
   $('.back', view).onclick = closeThread;
   if (EMBED) $('[data-open]', view).onclick = () => openInMonodesk(openKey);
-  if (synth) {
+  if ($('.saybox', view)) {
     $('.saybox', view).onclick = (e) => { if (e.target.closest('[data-say]')) readAloud(openKey); };
     $('[data-voice]', view).onclick = pickVoice;
   }
@@ -486,8 +486,8 @@ async function pickEnv() {
 }
 
 /* ---------- read aloud ---------- */
-// The speaker reads Claude's latest reply in one of the device's own voices (speechSynthesis: iOS voices on the
-// iPhone, Windows voices in Monodesk). iOS only lets a page talk in answer to a tap, so speech always starts inside
+// The speaker reads Claude's latest reply in an ElevenLabs voice when Monodesk has a key (see "ElevenLabs" below),
+// else in one of the device's own voices (speechSynthesis: iOS voices on the iPhone, Windows voices in Monodesk). iOS only lets a page talk in answer to a tap, so speech always starts inside
 // a click handler, with every piece queued right there. Tap again to stop.
 const synth = window.speechSynthesis && window.SpeechSynthesisUtterance ? speechSynthesis : null;
 const store = {
@@ -525,6 +525,83 @@ const myRate = () => +store.get('rate') || 1;
 const myPitch = () => +store.get('pitch') || 1;
 const myPause = () => +store.get('pause') || 0;
 const PAUSES = [[0, 'None'], [250, 'Short'], [500, 'Medium'], [900, 'Long']];
+
+// ElevenLabs: when Monodesk has a key in its config.js, the bridge turns the reply into an MP3 and the page plays it.
+// Without a key, or when it fails, the device's own voice reads instead. The key never comes to the phone.
+// xi is what /api/voices said: { enabled, voices, library, default, models, model, credits }.
+let xi = null, xiDown = 0; // xiDown: when ElevenLabs last failed; the device voice is used for 5 minutes after
+const loadXi = (fresh) => (DEMO ? Promise.resolve() : api('/api/voices' + (fresh ? '?now=1' : '')).then((r) => { xi = r; drawVoices(); }).catch(() => {}));
+loadXi();
+const useXi = () => xi?.enabled && store.get('engine') !== 'device' && Date.now() - xiDown > 5 * 6e4;
+const xiModel = () => (xi?.models.some((m) => m.id === store.get('xiModel')) ? store.get('xiModel') : xi?.model);
+const xiPer = () => xi?.models.find((m) => m.id === xiModel())?.per ?? 1;
+const xiVoice = () => {
+  const id = store.get('xiVoice');
+  const all = xi ? [...xi.voices, ...xi.library] : [];
+  return (id && all.find((v) => v.id === id)) || all.find((v) => v.id === xi?.default?.id) || xi?.default || null;
+};
+const n0 = (n) => Math.round(n).toLocaleString();
+// One <audio> for everything. iOS only lets it play from a tap, so each tap first starts it on a moment of silence;
+// the MP3 that arrives a second later then plays on the same element.
+const player = new Audio();
+player.setAttribute('playsinline', '');
+const SILENT = 'data:audio/mpeg;base64,//MkxAAAAANIAAAAAExBTUUzLjEwMSAoYmV0YSAzKVVVVVVVVVVMQU1FMy4xMDEg//MkxCMAAANIAAAAAChiZXRhIDMpVVVVVVVVVVVVVVVVVVVVVVVMQU1FMy4xMDEg//MkxEYAAANIAAAAAChiZXRhIDMpVVVVVVVVVVVVVVVVVVVVVVVMQU1FMy4xMDEg//MkxGkAAANIAAAAAChiZXRhIDMpVVVVVVVVVVVVVVVVVVVVVVVMQU1FMy4xMDEg//MkxIwAAANIAAAAAChiZXRhIDMpVVVVVVVVVVVVVVVVVVVVVVVMQU1FMy4xMDEg//MkxK8AAANIAAAAAChiZXRhIDMpVVVVVVVVVVVVVVVVVVVVVVVMQU1FMy4xMDEg//MkxNIAAANIAAAAAChiZXRhIDMpVVVVVVVVVVVVVVVVVVVVVVVMQU1FMy4xMDEg//MkxNwAAANIAAAAAChiZXRhIDMpVVVVVVVVVVVVVVVVVVVVVVVMQU1FMy4xMDEg//MkxNwAAANIAAAAAChiZXRhIDMpVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV//MkxNwAAANIAAAAAFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV//MkxNwAAANIAAAAAFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV//MkxNwAAANIAAAAAFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV//MkxNwAAANIAAAAAFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV//MkxNwAAANIAAAAAFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV//MkxNwAAANIAAAAAFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV';
+function unlock() {
+  player.src = SILENT;
+  player.play().catch(() => {});
+  // The same for the device voice, so it can take over if ElevenLabs fails after the tap.
+  if (synth) { const u = new SpeechSynthesisUtterance(' '); u.volume = 0; synth.speak(u); }
+}
+// Plays a URL on the shared player at your speed. onDone runs once, when it ends, fails or is stopped.
+function playUrl(url, onDone) {
+  const me = run;
+  let over = false;
+  const finish = (ok) => { if (over) return; over = true; player.onended = player.onerror = null; if (me === run) onDone?.(ok); };
+  player.onended = () => finish(true);
+  player.onerror = () => finish(false);
+  player.src = url;
+  player.defaultPlaybackRate = player.playbackRate = myRate();
+  player.preservesPitch = true;
+  return player.play().then(() => { player.playbackRate = myRate(); }, () => { finish(false); throw new Error('play'); });
+}
+
+// The MP3 for a reply, from the bridge. Each one is kept here too, so hearing it again is free and instant.
+const mp3s = new Map();
+let fetching = null;
+async function xiAudio(text) {
+  const v = xiVoice();
+  const body = { text, voice: v?.id, owner: v && !v.mine ? v.owner : undefined, model: xiModel(), pause: myPause() };
+  const k = JSON.stringify([body.voice, body.model, body.pause, text]);
+  if (mp3s.has(k)) return { url: mp3s.get(k), credits: 0 };
+  fetching = new AbortController();
+  const r = await fetch('/api/speak', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Monodesk': '1' }, body: JSON.stringify(body), signal: fetching.signal });
+  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'ElevenLabs didn’t answer');
+  const url = URL.createObjectURL(await r.blob());
+  mp3s.set(k, url);
+  // A library voice was just added to your ElevenLabs voices: from now on it's one of yours.
+  const now = r.headers.get('X-Voice');
+  if (v && !v.mine && now) { store.set('xiVoice', now); loadXi(true); }
+  const left = r.headers.get('X-Credits-Left');
+  if (xi?.credits && left !== '' && left != null) xi.credits.used = xi.credits.limit - +left;
+  return { url, credits: +r.headers.get('X-Credits') || 0, cached: r.headers.get('X-Cached') === '1', left: left === '' ? null : +left };
+}
+
+// Called from the tap. Falls back to the device voice if ElevenLabs fails.
+function sayXi(text, key, done) {
+  const me = ++run;
+  synth?.cancel();
+  unlock();
+  xiAudio(text).then((a) => {
+    if (me !== run) return;
+    const cost = a.credits ? `${n0(a.credits)} credits` + (a.left != null ? ` · ${n0(a.left)} left` : '') : 'Already paid for: free';
+    playUrl(a.url, done).then(() => toast(cost), () => { toast('Tap the speaker again to play it.'); });
+  }).catch((e) => {
+    if (me !== run || e.name === 'AbortError') return;
+    xiDown = Date.now();
+    toast(e.message.replace(/\.$/, '') + '. Using the phone’s voice.');
+    if (synth) speak(text, { onDone: done }); else done();
+  });
+}
 
 const sayButton = (key) => `<button class="say${saying === key ? ' on' : ''}" data-say aria-label="${saying === key ? 'Stop reading' : 'Read aloud'}">${saying === key ? ICON.stop : ICON.speak}</button>`;
 function drawThreadSay(t) {
@@ -631,42 +708,69 @@ function speak(text, { voice = myVoice(), rate = myRate(), pitch = myPitch(), pa
 }
 
 function readAloud(key) {
-  if (!synth) return toast('This browser can’t read aloud.');
+  if (!synth && !useXi()) return toast('This browser can’t read aloud.');
   if (saying === key) return hush();
   const t = threads.get(key) || (opened?.key === key ? opened : null);
   const text = spoken(latestReply(t));
   if (!text) return toast('Nothing to read yet.');
   saying = key;
-  speak(text, { onDone: () => { if (saying === key) { saying = null; drawSay(); } } });
+  const done = () => { if (saying === key) { saying = null; drawSay(); } };
+  if (useXi()) sayXi(text, key, done);
+  else speak(text, { onDone: done });
   drawSay();
 }
 function hush() {
-  if (!synth) return;
   run++;
+  fetching?.abort();
+  player.pause();
   clearInterval(watch);
   clearTimeout(gap);
-  synth.cancel();
+  synth?.cancel();
   if (saying) { saying = null; drawSay(); }
 }
 
-/* ---------- voice picker (temporary, to choose a voice on the real phone) ---------- */
+/* ---------- voice picker: ElevenLabs voices (when Monodesk has a key) or the device's own ---------- */
 const SAMPLE = 'Done. I pushed the fix to the dispatch repo, and the cards now read aloud. Want me to bump the Monodesk version too?';
 // Apple's joke voices, kept out of the list unless "Show all" is on.
 const NOVELTY = /^(Albert|Bad News|Bahh|Bells|Boing|Bubbles|Cellos|Deranged|Good News|Hysterical|Jester|Organ|Pipe Organ|Superstar|Trinoids|Whisper|Wobble|Zarvox|Fred|Junior|Kathy|Ralph|Princess|Grandma|Grandpa|Rocko|Shelley|Flo|Eddy|Reed|Sandy)\b/;
 const quality = (v) => (/premium/i.test(v.voiceURI + v.name) ? 'Premium' : /enhanced/i.test(v.voiceURI + v.name) ? 'Enhanced' : /natural|neural/i.test(v.name) ? 'Natural' : v.localService === false ? 'Online' : '');
 const RANK = { Premium: 0, Natural: 1, Enhanced: 2, Online: 3, '': 4 };
+const TYPICAL = 800; // characters in a typical spoken reply, for the cost line
+const aussie = (v) => /austral/i.test(v.accent || '');
+
+// An ElevenLabs voice's free sample (its preview clip costs no credits).
+function hearXi(v) {
+  hush();
+  if (!v?.preview) return toast('This voice has no sample. Read a reply to hear it.');
+  playUrl(v.preview).catch(() => {});
+}
 
 function pickVoice() {
-  if (!synth) return toast('This browser can’t read aloud.');
+  if (!synth && !xi?.enabled) return toast('This browser can’t read aloud.');
   hush();
   loadVoices();
-  const sh = sheet(`<h2>Voice <small>Tap one to hear it. The last one you tap is used.</small></h2>
+  if (xi?.enabled) loadXi(true); // fresh voices and credit balance
+  const eleven = !!xi?.enabled && store.get('engine') !== 'device';
+  const sh = sheet(`<h2>Voice <small>${eleven ? 'Tap a voice to hear its sample (free). The last one you tap reads your replies.' : 'Tap one to hear it. The last one you tap is used.'}</small></h2>
+    ${xi?.enabled ? `<div class="vctl"><span>From</span><div class="seg" data-engine><button data-e="xi">ElevenLabs</button><button data-e="device">This device</button></div></div>` : ''}
+    ${eleven ? `<div class="vctl"><span>Model</span><div class="seg" data-model>${xi.models.map((m) => `<button data-m="${esc(m.id)}">${esc(m.name)}</button>`).join('')}</div></div><div class="credits"></div>` : ''}
     <div class="vctl"><label><span>Speed</span><input type="range" min="0.6" max="1.6" step="0.05" data-k="rate"></label><b data-v="rate"></b></div>
-    <div class="vctl"><label><span>Pitch</span><input type="range" min="0.6" max="1.4" step="0.05" data-k="pitch"></label><b data-v="pitch"></b></div>
+    ${eleven ? '' : '<div class="vctl"><label><span>Pitch</span><input type="range" min="0.6" max="1.4" step="0.05" data-k="pitch"></label><b data-v="pitch"></b></div>'}
     <div class="vctl"><span>Pause</span><div class="seg" data-pause>${PAUSES.map(([ms, name]) => `<button data-ms="${ms}">${name}</button>`).join('')}</div>
-      <label class="chk"><input type="checkbox" data-all> Show all</label></div>
-    <div class="voices"></div>`);
-  const all = $('[data-all]', sh);
+      ${eleven ? '' : '<label class="chk"><input type="checkbox" data-all> Show all</label>'}</div>
+    <div class="voices" data-mode="${eleven ? 'xi' : 'device'}"></div>`);
+  const sample = () => (eleven ? hearXi(xiVoice()) : speak(SAMPLE));
+  const engine = $('[data-engine]', sh);
+  if (engine) {
+    engine.querySelectorAll('button').forEach((b) => b.classList.toggle('on', (b.dataset.e === 'xi') === eleven));
+    engine.onclick = (e) => { const b = e.target.closest('[data-e]'); if (b) { store.set('engine', b.dataset.e === 'device' ? 'device' : null); xiDown = 0; pickVoice(); } };
+  }
+  const model = $('[data-model]', sh);
+  if (model) {
+    const light = () => model.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.m === xiModel()));
+    model.onclick = (e) => { const b = e.target.closest('[data-m]'); if (b) { store.set('xiModel', b.dataset.m); light(); drawCredits(); } };
+    light();
+  }
   const now = { rate: myRate, pitch: myPitch };
   sh.querySelectorAll('[data-k]').forEach((r) => {
     const k = r.dataset.k, label = $(`[data-v="${k}"]`, sh);
@@ -674,14 +778,22 @@ function pickVoice() {
     r.value = now[k]();
     show();
     r.oninput = () => { store.set(k, r.value); show(); };
-    r.onchange = () => speak(SAMPLE); // hear it when you let go
+    r.onchange = sample; // hear it when you let go
   });
   const seg = $('[data-pause]', sh);
   const lightPause = () => seg.querySelectorAll('button').forEach((b) => b.classList.toggle('on', +b.dataset.ms === myPause()));
-  seg.onclick = (e) => { const b = e.target.closest('[data-ms]'); if (!b) return; store.set('pause', b.dataset.ms); lightPause(); speak(SAMPLE); };
+  // With ElevenLabs the pause goes between lines (not every sentence), and you hear it on the next reply.
+  seg.onclick = (e) => { const b = e.target.closest('[data-ms]'); if (!b) return; store.set('pause', b.dataset.ms); lightPause(); if (!eleven) speak(SAMPLE); };
   lightPause();
-  all.onchange = drawVoices;
+  const all = $('[data-all]', sh);
+  if (all) all.onchange = drawVoices;
   $('.voices', sh).onclick = (e) => {
+    const x = e.target.closest('[data-xi]');
+    if (x) {
+      store.set('xiVoice', x.dataset.xi);
+      hearXi([...xi.voices, ...xi.library].find((v) => v.id === x.dataset.xi));
+      return drawVoices();
+    }
     const b = e.target.closest('[data-uri]');
     if (!b) return;
     store.set('voicePick', b.dataset.uri || null);
@@ -691,9 +803,20 @@ function pickVoice() {
   drawVoices();
 }
 
+// Credits left, and what a reply costs on the chosen model.
+function drawCredits() {
+  const box = $('#layer .credits');
+  if (!box || !xi?.enabled) return;
+  const per = xiPer(), m = xi.models.find((x) => x.id === xiModel());
+  const c = xi.credits;
+  const left = c ? `<b>${n0(c.limit - c.used)}</b> of ${n0(c.limit)} credits left${c.reset ? ' · resets ' + new Date(c.reset).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : ''}. ` : '';
+  box.innerHTML = `${left}${esc(m?.name || '')} (${esc(m?.about || '')}) costs ${per} credit${per === 1 ? '' : 's'} per character: a typical ${TYPICAL}-character reply is about <b>${n0(TYPICAL * per)}</b>. Hearing one again is free.`;
+}
+
 function drawVoices() {
   const box = $('#layer .voices');
   if (!box) return;
+  if (box.dataset.mode === 'xi') return drawXiVoices(box);
   const showAll = $('#layer [data-all]')?.checked;
   const mine = (navigator.language || 'en').slice(0, 2).toLowerCase();
   const seen = new Set();
@@ -708,6 +831,19 @@ function drawVoices() {
   box.innerHTML = row('', 'Automatic', best ? `Best installed: ${short(best)}${quality(best) ? ' (' + quality(best) + ')' : ''}` : 'The device’s own choice', '')
     + list.map((v) => row(v.voiceURI, short(v), v.lang, quality(v))).join('')
     + (list.length ? '' : `<div class="none">${voices.length ? 'No voices in your language. Turn on Show all.' : 'No voices yet…'}</div>`);
+}
+
+// Your ElevenLabs voices (Australian first), then Australian voices from the library, which join your voices
+// the first time one reads a reply.
+function drawXiVoices(box) {
+  drawCredits();
+  if (!xi?.enabled) { box.innerHTML = '<div class="none">Loading…</div>'; return; }
+  const picked = xiVoice()?.id;
+  const label = (v) => [v.accent && v.accent[0].toUpperCase() + v.accent.slice(1), v.gender, v.about].filter(Boolean).join(' · ');
+  const row = (v) => `<button class="vrow${v.id === picked ? ' on' : ''}" data-xi="${esc(v.id)}"><span>${esc(v.name.replace(/\s+-\s+.*$/, ''))}<small>${esc(label(v) || 'ElevenLabs')}</small></span>${aussie(v) ? '<em>AU</em>' : ''}</button>`;
+  const mine = [...xi.voices].sort((a, b) => aussie(b) - aussie(a) || a.name.localeCompare(b.name));
+  box.innerHTML = `<div class="vhead">Your voices</div>${mine.map(row).join('') || '<div class="none">None yet.</div>'}`
+    + (xi.library.length ? `<div class="vhead">Australian voices from the ElevenLabs library <small>Picking one adds it to your voices when it first reads.</small></div>${xi.library.map(row).join('')}` : '');
 }
 
 /* ---------- polling ---------- */
