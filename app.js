@@ -511,13 +511,20 @@ const myVoice = () => {
   const uri = store.get('voicePick');
   return (uri && list.find((v) => v.voiceURI === uri)) || bestVoice(list);
 };
+// DK's favourite, used whenever it's installed (Matilda Premium, Australian English) unless another voice is picked.
+const FAVOURITE = /^Matilda\b/i;
 function bestVoice(list) {
   const want = (navigator.language || 'en-US').toLowerCase(), mine = want.slice(0, 2);
   return list
     .filter((v) => v.lang.slice(0, 2).toLowerCase() === mine && !NOVELTY.test(v.name))
-    .sort((a, b) => RANK[quality(a)] - RANK[quality(b)] || (b.lang.toLowerCase() === want) - (a.lang.toLowerCase() === want) || b.default - a.default || b.localService - a.localService)[0] || null;
+    .sort((a, b) => FAVOURITE.test(b.name) - FAVOURITE.test(a.name) || RANK[quality(a)] - RANK[quality(b)] || (b.lang.toLowerCase() === want) - (a.lang.toLowerCase() === want) || b.default - a.default || b.localService - a.localService)[0] || null;
 }
+// Speed and pitch (1 = the voice's own), and the pause between sentences in ms. A web app can't read the
+// iPhone's Spoken Content settings, so these are Dispatch's own, kept on the device.
 const myRate = () => +store.get('rate') || 1;
+const myPitch = () => +store.get('pitch') || 1;
+const myPause = () => +store.get('pause') || 0;
+const PAUSES = [[0, 'None'], [250, 'Short'], [500, 'Medium'], [900, 'Long']];
 
 const sayButton = (key) => `<button class="say${saying === key ? ' on' : ''}" data-say aria-label="${saying === key ? 'Stop reading' : 'Read aloud'}">${saying === key ? ICON.stop : ICON.speak}</button>`;
 function drawThreadSay(t) {
@@ -565,12 +572,13 @@ function spoken(src) {
 }
 
 // Short pieces, a sentence or a few: long utterances get cut off in some browsers, and short ones stop at once.
-function pieces(text) {
+// With a sentence pause, every sentence is its own piece.
+function pieces(text, bySentence) {
   const out = [];
   for (const line of text.split('\n')) {
     let cur = '';
     for (const s of line.split(/(?<=[.!?;:])\s+/)) {
-      if (cur && (cur + ' ' + s).length > 220) { out.push(cur); cur = ''; }
+      if (cur && (bySentence || (cur + ' ' + s).length > 220)) { out.push(cur); cur = ''; }
       cur = cur ? cur + ' ' + s : s;
     }
     if (cur) out.push(cur);
@@ -579,31 +587,45 @@ function pieces(text) {
 }
 
 // Speak text now (call from a tap). onDone runs once, when it finishes or is stopped.
-let run = 0, queued = [], watch = null;
-function speak(text, { voice = myVoice(), rate = myRate(), onDone } = {}) {
+let run = 0, queued = [], watch = null, gap = null;
+function speak(text, { voice = myVoice(), rate = myRate(), pitch = myPitch(), pause = myPause(), onDone } = {}) {
   const me = ++run;
   synth.cancel();
   clearInterval(watch);
+  clearTimeout(gap);
   let over = false;
-  const finish = () => { if (over || me !== run) return; over = true; clearInterval(watch); queued = []; onDone?.(); };
+  const finish = () => { if (over || me !== run) return; over = true; clearInterval(watch); clearTimeout(gap); queued = []; onDone?.(); };
   const lang = voice?.lang || navigator.language || 'en-US';
-  queued = pieces(text).map((p) => {
+  queued = pieces(text, pause > 0).map((p) => {
     const u = new SpeechSynthesisUtterance(p);
     if (voice) u.voice = voice;
     u.lang = lang;
     u.rate = rate;
+    u.pitch = pitch;
     return u; // kept in queued: Safari drops events for utterances it has garbage-collected
   });
   if (!queued.length) return finish();
   queued.at(-1).onend = finish;
   queued.forEach((u) => (u.onerror = (e) => { if (e.error !== 'interrupted' && e.error !== 'canceled') finish(); }));
   synth.resume(); // Chrome can be stuck paused
-  queued.forEach((u) => synth.speak(u));
+  let waiting = false;
+  if (pause > 0) {
+    // One sentence at a time, with the pause between. The first starts inside the tap, which is what iOS needs;
+    // after that the page may keep talking.
+    queued.slice(0, -1).forEach((u, i) => (u.onend = () => {
+      if (me !== run) return;
+      waiting = true;
+      gap = setTimeout(() => { waiting = false; if (me === run) synth.speak(queued[i + 1]); }, pause);
+    }));
+    synth.speak(queued[0]);
+  } else {
+    queued.forEach((u) => synth.speak(u));
+  }
   // Some engines never send the last "end"; if nothing is speaking or queued for a while, it's over.
   let quiet = 0, t0 = Date.now();
   watch = setInterval(() => {
     if (me !== run) return clearInterval(watch);
-    quiet = synth.speaking || synth.pending ? 0 : quiet + 1;
+    quiet = synth.speaking || synth.pending || waiting ? 0 : quiet + 1;
     if (quiet >= 3 && Date.now() - t0 > 1500) finish();
   }, 500);
 }
@@ -622,6 +644,7 @@ function hush() {
   if (!synth) return;
   run++;
   clearInterval(watch);
+  clearTimeout(gap);
   synth.cancel();
   if (saying) { saying = null; drawSay(); }
 }
@@ -638,14 +661,25 @@ function pickVoice() {
   hush();
   loadVoices();
   const sh = sheet(`<h2>Voice <small>Tap one to hear it. The last one you tap is used.</small></h2>
-    <div class="vctl"><label>Speed <input type="range" min="0.6" max="1.6" step="0.05" data-rate></label><b data-ratev></b>
+    <div class="vctl"><label><span>Speed</span><input type="range" min="0.6" max="1.6" step="0.05" data-k="rate"></label><b data-v="rate"></b></div>
+    <div class="vctl"><label><span>Pitch</span><input type="range" min="0.6" max="1.4" step="0.05" data-k="pitch"></label><b data-v="pitch"></b></div>
+    <div class="vctl"><span>Pause</span><div class="seg" data-pause>${PAUSES.map(([ms, name]) => `<button data-ms="${ms}">${name}</button>`).join('')}</div>
       <label class="chk"><input type="checkbox" data-all> Show all</label></div>
     <div class="voices"></div>`);
-  const rate = $('[data-rate]', sh), all = $('[data-all]', sh);
-  rate.value = myRate();
-  $('[data-ratev]', sh).textContent = myRate().toFixed(2) + '×';
-  rate.oninput = () => { store.set('rate', rate.value); $('[data-ratev]', sh).textContent = (+rate.value).toFixed(2) + '×'; };
-  rate.onchange = () => speak(SAMPLE);
+  const all = $('[data-all]', sh);
+  const now = { rate: myRate, pitch: myPitch };
+  sh.querySelectorAll('[data-k]').forEach((r) => {
+    const k = r.dataset.k, label = $(`[data-v="${k}"]`, sh);
+    const show = () => (label.textContent = (+r.value).toFixed(2) + (k === 'rate' ? '×' : ''));
+    r.value = now[k]();
+    show();
+    r.oninput = () => { store.set(k, r.value); show(); };
+    r.onchange = () => speak(SAMPLE); // hear it when you let go
+  });
+  const seg = $('[data-pause]', sh);
+  const lightPause = () => seg.querySelectorAll('button').forEach((b) => b.classList.toggle('on', +b.dataset.ms === myPause()));
+  seg.onclick = (e) => { const b = e.target.closest('[data-ms]'); if (!b) return; store.set('pause', b.dataset.ms); lightPause(); speak(SAMPLE); };
+  lightPause();
   all.onchange = drawVoices;
   $('.voices', sh).onclick = (e) => {
     const b = e.target.closest('[data-uri]');

@@ -160,7 +160,13 @@ button { font: inherit; color: inherit; }
 .vctl label:first-child { flex: 1; display: flex; align-items: center; gap: 10px; }
 .vctl input[type=range] { flex: 1; min-width: 0; accent-color: var(--accent); }
 .vctl b { width: 3.4em; color: var(--text); font-weight: 600; }
-.vctl .chk { display: flex; align-items: center; gap: 5px; white-space: nowrap; }
+.vctl .chk { display: flex; align-items: center; gap: 5px; white-space: nowrap; margin-left: auto; }
+.vctl > span, .vctl label > span { width: 3.1em; flex: none; }
+.vctl label:first-child { min-width: 0; }
+.seg { display: flex; gap: 4px; }
+.vctl:has(.seg) { flex-wrap: wrap; row-gap: 8px; }
+.seg button { height: 30px; padding: 0 9px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--dim); font-size: 13px; }
+.seg button.on { border-color: var(--accent); color: var(--text); background: rgba(217, 119, 87, .12); }
 .voices { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 6px; }
 .vrow { display: flex; align-items: center; gap: 8px; text-align: left; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 9px 11px; min-width: 0; }
 .vrow span { flex: 1; min-width: 0; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
