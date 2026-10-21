@@ -529,10 +529,11 @@ const PAUSES = [[0, 'None'], [250, 'Short'], [500, 'Medium'], [900, 'Long']];
 // ElevenLabs: when Monodesk has a key in its config.js, the bridge turns the reply into an MP3 and the page plays it.
 // Without a key, or when it fails, the device's own voice reads instead. The key never comes to the phone.
 // xi is what /api/voices said: { enabled, voices, library, default, models, model, credits }.
-let xi = null, xiDown = 0; // xiDown: when ElevenLabs last failed; the device voice is used for 5 minutes after
+let xi = null;
 const loadXi = (fresh) => (DEMO ? Promise.resolve() : api('/api/voices' + (fresh ? '?now=1' : '')).then((r) => { xi = r; drawVoices(); }).catch(() => {}));
 loadXi();
-const useXi = () => xi?.enabled && store.get('engine') !== 'device' && Date.now() - xiDown > 5 * 6e4;
+// ElevenLabs unless you picked a device voice. Before /api/voices has answered, it's tried anyway: the bridge says if there's no key.
+const useXi = () => store.get('engine') !== 'device' && (xi ? !!xi.enabled : !DEMO);
 const xiModel = () => (xi?.models.some((m) => m.id === store.get('xiModel')) ? store.get('xiModel') : xi?.model);
 const xiPer = () => xi?.models.find((m) => m.id === xiModel())?.per ?? 1;
 const xiVoice = () => {
@@ -597,7 +598,7 @@ function sayXi(text, key, done) {
     playUrl(a.url, done).then(() => toast(cost), () => { toast('Tap the speaker again to play it.'); });
   }).catch((e) => {
     if (me !== run || e.name === 'AbortError') return;
-    xiDown = Date.now();
+    // Only this reply falls back; the next tap tries ElevenLabs again.
     toast(e.message.replace(/\.$/, '') + '. Using the phone’s voice.');
     if (synth) speak(text, { onDone: done }); else done();
   });
@@ -791,7 +792,6 @@ function pickVoice() {
     if (x) {
       store.set('engine', null);
       store.set('xiVoice', x.dataset.xi);
-      xiDown = 0;
       hearXi([...xi.voices, ...xi.library].find((v) => v.id === x.dataset.xi));
       return drawVoices();
     }
