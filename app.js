@@ -729,7 +729,7 @@ function hush() {
   if (saying) { saying = null; drawSay(); }
 }
 
-/* ---------- voice picker: ElevenLabs voices (when Monodesk has a key) or the device's own ---------- */
+/* ---------- voice picker: ElevenLabs voices (when Monodesk has a key) and the device's own, in one list ---------- */
 const SAMPLE = 'Done. I pushed the fix to the dispatch repo, and the cards now read aloud. Want me to bump the Monodesk version too?';
 // Apple's joke voices, kept out of the list unless "Show all" is on.
 const NOVELTY = /^(Albert|Bad News|Bahh|Bells|Boing|Bubbles|Cellos|Deranged|Good News|Hysterical|Jester|Organ|Pipe Organ|Superstar|Trinoids|Whisper|Wobble|Zarvox|Fred|Junior|Kathy|Ralph|Princess|Grandma|Grandpa|Rocko|Shelley|Flo|Eddy|Reed|Sandy)\b/;
@@ -750,21 +750,14 @@ function pickVoice() {
   hush();
   loadVoices();
   if (xi?.enabled) loadXi(true); // fresh voices and credit balance
-  const eleven = !!xi?.enabled && store.get('engine') !== 'device';
-  const sh = sheet(`<h2>Voice <small>${eleven ? 'Tap a voice to hear its sample (free). The last one you tap reads your replies.' : 'Tap one to hear it. The last one you tap is used.'}</small></h2>
-    ${xi?.enabled ? `<div class="vctl"><span>From</span><div class="seg" data-engine><button data-e="xi">ElevenLabs</button><button data-e="device">This device</button></div></div>` : ''}
-    ${eleven ? `<div class="vctl"><span>Model</span><div class="seg" data-model>${xi.models.map((m) => `<button data-m="${esc(m.id)}">${esc(m.name)}</button>`).join('')}</div></div><div class="credits"></div>` : ''}
+  const sh = sheet(`<h2>Voice <small>Tap one to hear it${xi?.enabled ? ' (ElevenLabs samples are free)' : ''}. The last one you tap reads your replies.</small></h2>
+    ${xi?.enabled ? `<div class="vctl"><span>Model</span><div class="seg" data-model>${xi.models.map((m) => `<button data-m="${esc(m.id)}">${esc(m.name)}</button>`).join('')}</div></div><div class="credits"></div>` : ''}
     <div class="vctl"><label><span>Speed</span><input type="range" min="0.6" max="1.6" step="0.05" data-k="rate"></label><b data-v="rate"></b></div>
-    ${eleven ? '' : '<div class="vctl"><label><span>Pitch</span><input type="range" min="0.6" max="1.4" step="0.05" data-k="pitch"></label><b data-v="pitch"></b></div>'}
+    ${synth ? '<div class="vctl"><label><span>Pitch</span><input type="range" min="0.6" max="1.4" step="0.05" data-k="pitch"></label><b data-v="pitch"></b></div>' : ''}
     <div class="vctl"><span>Pause</span><div class="seg" data-pause>${PAUSES.map(([ms, name]) => `<button data-ms="${ms}">${name}</button>`).join('')}</div>
-      ${eleven ? '' : '<label class="chk"><input type="checkbox" data-all> Show all</label>'}</div>
-    <div class="voices" data-mode="${eleven ? 'xi' : 'device'}"></div>`);
-  const sample = () => (eleven ? hearXi(xiVoice()) : speak(SAMPLE));
-  const engine = $('[data-engine]', sh);
-  if (engine) {
-    engine.querySelectorAll('button').forEach((b) => b.classList.toggle('on', (b.dataset.e === 'xi') === eleven));
-    engine.onclick = (e) => { const b = e.target.closest('[data-e]'); if (b) { store.set('engine', b.dataset.e === 'device' ? 'device' : null); xiDown = 0; pickVoice(); } };
-  }
+      ${synth ? '<label class="chk"><input type="checkbox" data-all> Show all</label>' : ''}</div>
+    <div class="voices"></div>`);
+  const sample = () => (useXi() ? hearXi(xiVoice()) : speak(SAMPLE));
   const model = $('[data-model]', sh);
   if (model) {
     const light = () => model.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.m === xiModel()));
@@ -778,24 +771,27 @@ function pickVoice() {
     r.value = now[k]();
     show();
     r.oninput = () => { store.set(k, r.value); show(); };
-    r.onchange = sample; // hear it when you let go
+    r.onchange = k === 'pitch' ? () => speak(SAMPLE) : sample; // hear it when you let go (pitch is for device voices)
   });
   const seg = $('[data-pause]', sh);
   const lightPause = () => seg.querySelectorAll('button').forEach((b) => b.classList.toggle('on', +b.dataset.ms === myPause()));
   // With ElevenLabs the pause goes between lines (not every sentence), and you hear it on the next reply.
-  seg.onclick = (e) => { const b = e.target.closest('[data-ms]'); if (!b) return; store.set('pause', b.dataset.ms); lightPause(); if (!eleven) speak(SAMPLE); };
+  seg.onclick = (e) => { const b = e.target.closest('[data-ms]'); if (!b) return; store.set('pause', b.dataset.ms); lightPause(); if (!useXi()) speak(SAMPLE); };
   lightPause();
   const all = $('[data-all]', sh);
   if (all) all.onchange = drawVoices;
   $('.voices', sh).onclick = (e) => {
     const x = e.target.closest('[data-xi]');
     if (x) {
+      store.set('engine', null);
       store.set('xiVoice', x.dataset.xi);
+      xiDown = 0;
       hearXi([...xi.voices, ...xi.library].find((v) => v.id === x.dataset.xi));
       return drawVoices();
     }
     const b = e.target.closest('[data-uri]');
     if (!b) return;
+    store.set('engine', 'device');
     store.set('voicePick', b.dataset.uri || null);
     speak(SAMPLE);
     drawVoices();
@@ -814,10 +810,25 @@ function drawCredits() {
   box.innerHTML = `${left}${esc(m?.name || '')} (${esc(m?.about || '')}) costs ${per} credit${per === 1 ? '' : 's'} per character: a typical ${TYPICAL}-character reply is about <b>${n0(TYPICAL * per)}</b>. Hearing one again is free.${more}`;
 }
 
+// ElevenLabs voices first (your "dispatch" collection when it exists), then the device's own.
 function drawVoices() {
   const box = $('#layer .voices');
   if (!box) return;
-  if (box.dataset.mode === 'xi') return drawXiVoices(box);
+  drawCredits();
+  box.innerHTML = (xi?.enabled ? xiRows() : '') + (synth ? deviceRows() : '');
+}
+
+function xiRows() {
+  const picked = useXi() ? xiVoice()?.id : null;
+  const label = (v) => [v.accent && v.accent[0].toUpperCase() + v.accent.slice(1), v.gender, v.about].filter(Boolean).join(' · ');
+  const row = (v) => `<button class="vrow${v.id === picked ? ' on' : ''}" data-xi="${esc(v.id)}"><span>${esc(v.name.replace(/\s+-\s+.*$/, ''))}<small>${esc(label(v) || 'ElevenLabs')}</small></span><em>${aussie(v) ? 'AU' : 'EL'}</em></button>`;
+  const mine = [...xi.voices].sort((a, b) => aussie(b) - aussie(a) || a.name.localeCompare(b.name));
+  const head = xi.collection ? `ElevenLabs · ${esc(xi.collection)}` : 'ElevenLabs · your voices';
+  return `<div class="vhead">${head}</div>${mine.map(row).join('') || '<div class="none">None yet.</div>'}`
+    + (xi.library.length ? `<div class="vhead">Australian voices from the ElevenLabs library <small>Picking one adds it to your voices when it first reads.</small></div>${xi.library.map(row).join('')}` : '');
+}
+
+function deviceRows() {
   const showAll = $('#layer [data-all]')?.checked;
   const mine = (navigator.language || 'en').slice(0, 2).toLowerCase();
   const seen = new Set();
@@ -825,26 +836,15 @@ function drawVoices() {
     .filter((v) => !seen.has(v.voiceURI) && seen.add(v.voiceURI))
     .filter((v) => showAll || (v.lang.slice(0, 2).toLowerCase() === mine && !NOVELTY.test(v.name)))
     .sort((a, b) => RANK[quality(a)] - RANK[quality(b)] || (b.lang.slice(0, 2).toLowerCase() === mine) - (a.lang.slice(0, 2).toLowerCase() === mine) || a.name.localeCompare(b.name));
-  const picked = store.get('voicePick') && myVoice()?.voiceURI === store.get('voicePick') ? store.get('voicePick') : '';
+  const device = !useXi();
+  const picked = !device ? null : store.get('voicePick') && myVoice()?.voiceURI === store.get('voicePick') ? store.get('voicePick') : '';
   const short = (v) => v.name.replace(/^Microsoft\s+/, '').replace(/\s+-\s+.*$/, '').replace(/\s*\((Premium|Enhanced)\)/i, '');
   const best = bestVoice(voices);
   const row = (uri, name, sub, q) => `<button class="vrow${uri === picked ? ' on' : ''}" data-uri="${esc(uri)}"><span>${esc(name)}<small>${esc(sub)}</small></span>${q ? `<em>${q}</em>` : ''}</button>`;
-  box.innerHTML = row('', 'Automatic', best ? `Best installed: ${short(best)}${quality(best) ? ' (' + quality(best) + ')' : ''}` : 'The device’s own choice', '')
+  return `<div class="vhead">${EMBED ? 'This computer' : 'This phone'}</div>`
+    + row('', 'Automatic', best ? `Best installed: ${short(best)}${quality(best) ? ' (' + quality(best) + ')' : ''}` : 'The device’s own choice', '')
     + list.map((v) => row(v.voiceURI, short(v), v.lang, quality(v))).join('')
     + (list.length ? '' : `<div class="none">${voices.length ? 'No voices in your language. Turn on Show all.' : 'No voices yet…'}</div>`);
-}
-
-// Your ElevenLabs voices (Australian first), then Australian voices from the library, which join your voices
-// the first time one reads a reply.
-function drawXiVoices(box) {
-  drawCredits();
-  if (!xi?.enabled) { box.innerHTML = '<div class="none">Loading…</div>'; return; }
-  const picked = xiVoice()?.id;
-  const label = (v) => [v.accent && v.accent[0].toUpperCase() + v.accent.slice(1), v.gender, v.about].filter(Boolean).join(' · ');
-  const row = (v) => `<button class="vrow${v.id === picked ? ' on' : ''}" data-xi="${esc(v.id)}"><span>${esc(v.name.replace(/\s+-\s+.*$/, ''))}<small>${esc(label(v) || 'ElevenLabs')}</small></span>${aussie(v) ? '<em>AU</em>' : ''}</button>`;
-  const mine = [...xi.voices].sort((a, b) => aussie(b) - aussie(a) || a.name.localeCompare(b.name));
-  box.innerHTML = `<div class="vhead">Your voices</div>${mine.map(row).join('') || '<div class="none">None yet.</div>'}`
-    + (xi.library.length ? `<div class="vhead">Australian voices from the ElevenLabs library <small>Picking one adds it to your voices when it first reads.</small></div>${xi.library.map(row).join('')}` : '');
 }
 
 /* ---------- polling ---------- */
