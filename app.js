@@ -502,7 +502,21 @@ if (synth) {
   loadVoices();
   synth.onvoiceschanged = () => { loadVoices(); drawVoices(); };
 }
-const myVoice = () => { const uri = store.get('voice'); return (uri && (voices.length ? voices : loadVoices()).find((v) => v.voiceURI === uri)) || null; };
+// The voice: the one picked in the voice picker, else the best one installed (a Premium or Enhanced voice you
+// downloaded in iOS Settings beats the built-in default, which is what a web app gets otherwise).
+// Picks are kept under "voicePick"; an older "voice" pick is dropped, so new downloads take over.
+store.set('voice', null);
+const myVoice = () => {
+  const list = voices.length ? voices : loadVoices();
+  const uri = store.get('voicePick');
+  return (uri && list.find((v) => v.voiceURI === uri)) || bestVoice(list);
+};
+function bestVoice(list) {
+  const want = (navigator.language || 'en-US').toLowerCase(), mine = want.slice(0, 2);
+  return list
+    .filter((v) => v.lang.slice(0, 2).toLowerCase() === mine && !NOVELTY.test(v.name))
+    .sort((a, b) => RANK[quality(a)] - RANK[quality(b)] || (b.lang.toLowerCase() === want) - (a.lang.toLowerCase() === want) || b.default - a.default || b.localService - a.localService)[0] || null;
+}
 const myRate = () => +store.get('rate') || 1;
 
 const sayButton = (key) => `<button class="say${saying === key ? ' on' : ''}" data-say aria-label="${saying === key ? 'Stop reading' : 'Read aloud'}">${saying === key ? ICON.stop : ICON.speak}</button>`;
@@ -636,7 +650,7 @@ function pickVoice() {
   $('.voices', sh).onclick = (e) => {
     const b = e.target.closest('[data-uri]');
     if (!b) return;
-    store.set('voice', b.dataset.uri || null);
+    store.set('voicePick', b.dataset.uri || null);
     speak(SAMPLE);
     drawVoices();
   };
@@ -653,10 +667,12 @@ function drawVoices() {
     .filter((v) => !seen.has(v.voiceURI) && seen.add(v.voiceURI))
     .filter((v) => showAll || (v.lang.slice(0, 2).toLowerCase() === mine && !NOVELTY.test(v.name)))
     .sort((a, b) => RANK[quality(a)] - RANK[quality(b)] || (b.lang.slice(0, 2).toLowerCase() === mine) - (a.lang.slice(0, 2).toLowerCase() === mine) || a.name.localeCompare(b.name));
-  const cur = myVoice()?.voiceURI || '';
-  const row = (uri, name, sub, q) => `<button class="vrow${uri === cur ? ' on' : ''}" data-uri="${esc(uri)}"><span>${esc(name)}<small>${esc(sub)}</small></span>${q ? `<em>${q}</em>` : ''}</button>`;
-  box.innerHTML = row('', 'Default', 'The device’s own choice', '')
-    + list.map((v) => row(v.voiceURI, v.name.replace(/^Microsoft\s+/, '').replace(/\s+-\s+.*$/, '').replace(/\s*\((Premium|Enhanced)\)/i, ''), v.lang, quality(v))).join('')
+  const picked = store.get('voicePick') && myVoice()?.voiceURI === store.get('voicePick') ? store.get('voicePick') : '';
+  const short = (v) => v.name.replace(/^Microsoft\s+/, '').replace(/\s+-\s+.*$/, '').replace(/\s*\((Premium|Enhanced)\)/i, '');
+  const best = bestVoice(voices);
+  const row = (uri, name, sub, q) => `<button class="vrow${uri === picked ? ' on' : ''}" data-uri="${esc(uri)}"><span>${esc(name)}<small>${esc(sub)}</small></span>${q ? `<em>${q}</em>` : ''}</button>`;
+  box.innerHTML = row('', 'Automatic', best ? `Best installed: ${short(best)}${quality(best) ? ' (' + quality(best) + ')' : ''}` : 'The device’s own choice', '')
+    + list.map((v) => row(v.voiceURI, short(v), v.lang, quality(v))).join('')
     + (list.length ? '' : `<div class="none">${voices.length ? 'No voices in your language. Turn on Show all.' : 'No voices yet…'}</div>`);
 }
 
