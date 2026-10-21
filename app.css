@@ -204,3 +204,6 @@ html.embed .card .open { opacity: 0; transition: opacity .12s ease; }
 html.embed .card:hover .open { opacity: 1; }
 html.embed .card .open:hover, html.embed .openbtn:hover { color: var(--text); border-color: var(--dim); }
 html.embed .openbtn { height: 30px; padding: 0 12px; font-size: 12.5px; }
+
+/* The line between a reply's spoken part and its desk detail. */
+.m hr { border: 0; border-top: 1px solid var(--line); margin: 14px 0; }

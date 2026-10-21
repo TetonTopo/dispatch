@@ -69,7 +69,7 @@ async function api(path, body) {
 function md(src) {
   return String(src || '').split(/```/).map((part, i) => {
     if (i % 2) return `<pre><code>${esc(part.replace(/^[^\n]*\n/, ''))}</code></pre>`;
-    return part.trim().split(/\n{2,}/).map((p) => {
+    return part.replace(/^---[ \t]*$/gm, '\n\n---\n\n').trim().split(/\n{2,}/).map((p) => {
       const inline = (s) => esc(s)
         .replace(/`([^`]+)`/g, '<code>$1</code>')
         .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')
@@ -77,12 +77,18 @@ function md(src) {
       const lines = p.split('\n');
       if (lines.every((l) => /^\s*[-*•]\s/.test(l))) return `<ul>${lines.map((l) => `<li>${inline(l.replace(/^\s*[-*•]\s/, ''))}</li>`).join('')}</ul>`;
       if (lines.every((l) => /^\s*\d+[.)]\s/.test(l))) return `<ol>${lines.map((l) => `<li>${inline(l.replace(/^\s*\d+[.)]\s/, ''))}</li>`).join('')}</ol>`;
+      if (/^---\s*$/.test(p)) return '<hr>';
       const h = /^(#{1,3})\s+(.*)$/.exec(p);
       if (h && lines.length === 1) return `<h3>${inline(h[2])}</h3>`;
       return p ? `<p>${lines.map(inline).join('<br>')}</p>` : '';
     }).join('');
   }).join('');
 }
+
+// Replies can end with desk-only detail after a line that is just "---" (see ~/.claude/CLAUDE.md): the speaker and
+// the card's line use only what comes before it. A reply that starts with the line keeps all of it.
+const SPLIT = /^---[ 	]*$/m;
+const speechPart = (text) => String(text || '').split(SPLIT)[0].trim() || String(text || '');
 
 // The first sentence, as plain text.
 function firstSentence(text) {
@@ -113,6 +119,7 @@ function sentences(par) {
   return plain.split(/(?<=[.!?])\s+(?=["“(\[A-Z0-9])/).map((s) => s.trim()).filter(Boolean);
 }
 function preview(text) {
+  text = speechPart(text);
   const pars = String(text || '')
     .replace(/```[\s\S]*?(```|$)/g, '\n\n')
     .split(/\n{2,}/)
@@ -712,7 +719,7 @@ function readAloud(key) {
   if (!synth && !useXi()) return toast('This browser can’t read aloud.');
   if (saying === key) return hush();
   const t = threads.get(key) || (opened?.key === key ? opened : null);
-  const text = spoken(latestReply(t));
+  const text = spoken(speechPart(latestReply(t)));
   if (!text) return toast('Nothing to read yet.');
   saying = key;
   const done = () => { if (saying === key) { saying = null; drawSay(); } };
