@@ -179,7 +179,17 @@ button { font: inherit; color: inherit; }
 /* ElevenLabs: credits left and what a reply costs. */
 .credits { font-size: 12.5px; color: var(--faint); margin: -4px 0 12px; line-height: 1.4; }
 .credits b { color: var(--text); font-weight: 600; }
-.credits .warn { display: block; margin-top: 4px; color: var(--accent); }
+.credits .warn { color: var(--accent); }
+.sheet h2 .credits { margin: 2px 0 0; font-size: 12.5px; }
+/* "Show iPhone voices", and the folded Details and settings. */
+.more { display: block; width: 100%; margin: 8px 0 0; padding: 9px; border-radius: 10px; border: 1px dashed var(--line); background: none; color: var(--dim); font-size: 13px; }
+.vset { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 10px; }
+.vset summary { cursor: pointer; font-size: 13px; color: var(--dim); list-style: none; }
+.vset summary::-webkit-details-marker { display: none; }
+.vset summary::before { content: '›'; display: inline-block; width: 1em; transition: transform .15s; }
+.vset[open] summary::before { transform: rotate(90deg); }
+.vset[open] summary { margin-bottom: 12px; }
+.vnote { font-size: 12.5px; color: var(--faint); margin: -4px 0 12px; line-height: 1.4; }
 
 .toast { position: absolute; left: 50%; top: 14px; transform: translateX(-50%); z-index: 20; background: var(--text); color: var(--bg); border-radius: 10px; padding: 7px 12px; font-size: 13px; font-weight: 500; max-width: 90%; animation: fade .2s ease; }
 .notice { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; color: var(--dim); padding: 24px; font-size: 14px; }

@@ -593,7 +593,7 @@ function sayXi(text, key, done) {
   unlock();
   xiAudio(text).then((a) => {
     if (me !== run) return;
-    const cost = a.credits ? `${n0(a.credits)} credits` + (a.left != null ? ` · ${n0(a.left)} left` : '') : 'Already paid for: free';
+    const cost = a.credits ? `${n0(a.credits)} credits` + (a.left != null ? ` · ${k0(a.left)} left` : '') : 'Already paid for: free';
     playUrl(a.url, done).then(() => toast(cost), () => { toast('Tap the speaker again to play it.'); });
   }).catch((e) => {
     if (me !== run || e.name === 'AbortError') return;
@@ -729,14 +729,16 @@ function hush() {
   if (saying) { saying = null; drawSay(); }
 }
 
-/* ---------- voice picker: ElevenLabs voices (when Monodesk has a key) and the device's own, in one list ---------- */
+/* ---------- voice picker: ElevenLabs voices up top; phone voices and settings tucked away ---------- */
 const SAMPLE = 'Done. I pushed the fix to the dispatch repo, and the cards now read aloud. Want me to bump the Monodesk version too?';
-// Apple's joke voices, kept out of the list unless "Show all" is on.
+// Apple's joke voices, listed last.
 const NOVELTY = /^(Albert|Bad News|Bahh|Bells|Boing|Bubbles|Cellos|Deranged|Good News|Hysterical|Jester|Organ|Pipe Organ|Superstar|Trinoids|Whisper|Wobble|Zarvox|Fred|Junior|Kathy|Ralph|Princess|Grandma|Grandpa|Rocko|Shelley|Flo|Eddy|Reed|Sandy)\b/;
 const quality = (v) => (/premium/i.test(v.voiceURI + v.name) ? 'Premium' : /enhanced/i.test(v.voiceURI + v.name) ? 'Enhanced' : /natural|neural/i.test(v.name) ? 'Natural' : v.localService === false ? 'Online' : '');
 const RANK = { Premium: 0, Natural: 1, Enhanced: 2, Online: 3, '': 4 };
 const TYPICAL = 800; // characters in a typical spoken reply, for the cost line
 const aussie = (v) => /austral/i.test(v.accent || '');
+const k0 = (n) => (Math.abs(n) >= 1000 ? Math.round(n / 1000) + 'k' : n0(n)); // 123,914 → 124k
+const PHONE = EMBED ? 'computer' : 'iPhone';
 
 // An ElevenLabs voice's free sample (its preview clip costs no credits).
 function hearXi(v) {
@@ -750,13 +752,16 @@ function pickVoice() {
   hush();
   loadVoices();
   if (xi?.enabled) loadXi(true); // fresh voices and credit balance
-  const sh = sheet(`<h2>Voice <small>Tap one to hear it${xi?.enabled ? ' (ElevenLabs samples are free)' : ''}. The last one you tap reads your replies.</small></h2>
-    ${xi?.enabled ? `<div class="vctl"><span>Model</span><div class="seg" data-model>${xi.models.map((m) => `<button data-m="${esc(m.id)}">${esc(m.name)}</button>`).join('')}</div></div><div class="credits"></div>` : ''}
-    <div class="vctl"><label><span>Speed</span><input type="range" min="0.6" max="1.6" step="0.05" data-k="rate"></label><b data-v="rate"></b></div>
-    ${synth ? '<div class="vctl"><label><span>Pitch</span><input type="range" min="0.6" max="1.4" step="0.05" data-k="pitch"></label><b data-v="pitch"></b></div>' : ''}
-    <div class="vctl"><span>Pause</span><div class="seg" data-pause>${PAUSES.map(([ms, name]) => `<button data-ms="${ms}">${name}</button>`).join('')}</div>
-      ${synth ? '<label class="chk"><input type="checkbox" data-all> Show all</label>' : ''}</div>
-    <div class="voices"></div>`);
+  const sh = sheet(`<h2>Voice <small class="credits"></small></h2>
+    <div class="voices"></div>
+    ${synth && xi?.enabled ? `<button class="more" data-phone></button>` : ''}
+    <details class="vset"><summary>Details and settings</summary>
+      ${xi?.enabled ? `<div class="vctl"><span>Model</span><div class="seg" data-model>${xi.models.map((m) => `<button data-m="${esc(m.id)}">${esc(m.name)}</button>`).join('')}</div></div><p class="vnote" data-cost></p>` : ''}
+      <div class="vctl"><label><span>Speed</span><input type="range" min="0.6" max="1.6" step="0.05" data-k="rate"></label><b data-v="rate"></b></div>
+      ${synth ? `<div class="vctl"><label><span>Pitch</span><input type="range" min="0.6" max="1.4" step="0.05" data-k="pitch"></label><b data-v="pitch"></b></div>` : ''}
+      <div class="vctl"><span>Pause</span><div class="seg" data-pause>${PAUSES.map(([ms, name]) => `<button data-ms="${ms}">${name}</button>`).join('')}</div></div>
+      <p class="vnote">Tap a voice to hear it${xi?.enabled ? ' (ElevenLabs samples are free)' : ''}. The last one you tap reads your replies.${synth && xi?.enabled ? ` Pitch only changes ${PHONE} voices.` : ''}</p>
+    </details>`);
   const sample = () => (useXi() ? hearXi(xiVoice()) : speak(SAMPLE));
   const model = $('[data-model]', sh);
   if (model) {
@@ -778,8 +783,9 @@ function pickVoice() {
   // With ElevenLabs the pause goes between lines (not every sentence), and you hear it on the next reply.
   seg.onclick = (e) => { const b = e.target.closest('[data-ms]'); if (!b) return; store.set('pause', b.dataset.ms); lightPause(); if (!useXi()) speak(SAMPLE); };
   lightPause();
-  const all = $('[data-all]', sh);
-  if (all) all.onchange = drawVoices;
+  // The phone's own voices stay folded away (unless one of them is in use).
+  const phone = $('[data-phone]', sh);
+  if (phone) phone.onclick = () => { store.set('showPhone', store.get('showPhone') ? null : '1'); drawVoices(); };
   $('.voices', sh).onclick = (e) => {
     const x = e.target.closest('[data-xi]');
     if (x) {
@@ -799,52 +805,55 @@ function pickVoice() {
   drawVoices();
 }
 
-// Credits left, and what a reply costs on the chosen model.
+// The headline: credits left to the nearest thousand. The cost per reply goes in Details.
 function drawCredits() {
-  const box = $('#layer .credits');
-  if (!box || !xi?.enabled) return;
-  const per = xiPer(), m = xi.models.find((x) => x.id === xiModel());
+  const top = $('#layer .credits'), cost = $('#layer [data-cost]');
+  if (!xi?.enabled) return;
   const c = xi.credits;
-  const left = c ? `<b>${n0(c.limit - c.used)}</b> of ${n0(c.limit)} credits left${c.reset ? ' · resets ' + new Date(c.reset).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : ''}. ` : '';
-  const more = xi.limited ? ' <span class="warn">Your key can only make speech. To see your own voices, Australian library voices and credits left, give it Voices (read and write) and User (read) access at elevenlabs.io → Developers → API Keys.</span>' : '';
-  box.innerHTML = `${left}${esc(m?.name || '')} (${esc(m?.about || '')}) costs ${per} credit${per === 1 ? '' : 's'} per character: a typical ${TYPICAL}-character reply is about <b>${n0(TYPICAL * per)}</b>. Hearing one again is free.${more}`;
+  if (top) top.innerHTML = c ? `${k0(c.limit - c.used)} of ${k0(c.limit)} credits left` : xi.limited ? '<span class="warn">Your ElevenLabs key needs more access</span>' : '';
+  if (!cost) return;
+  const per = xiPer(), m = xi.models.find((x) => x.id === xiModel());
+  cost.innerHTML = `${esc(m?.name || '')} (${esc(m?.about || '')}): ${per} credit${per === 1 ? '' : 's'} per character, so a typical reply is about ${n0(TYPICAL * per)}. Hearing one again is free.`
+    + (c?.reset ? ` Credits reset ${new Date(c.reset).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}.` : '')
+    + (xi.limited ? ' Your key can only make speech: give it Voices (read and write) and User (read) access at elevenlabs.io → Developers → API Keys.' : '');
 }
 
-// ElevenLabs voices first (your "dispatch" collection when it exists), then the device's own.
+// ElevenLabs voices (your "dispatch" collection when it exists); the phone's own behind a button.
 function drawVoices() {
   const box = $('#layer .voices');
   if (!box) return;
   drawCredits();
-  box.innerHTML = (xi?.enabled ? xiRows() : '') + (synth ? deviceRows() : '');
+  const open = !xi?.enabled || !useXi() || !!store.get('showPhone');
+  const btn = $('#layer [data-phone]');
+  if (btn) btn.textContent = open && useXi() ? `Hide ${PHONE} voices` : `Show ${PHONE} voices`;
+  if (btn) btn.hidden = !useXi(); // a phone voice is in use: its list stays open
+  box.innerHTML = (xi?.enabled ? xiRows() : '') + (synth && open ? deviceRows() : '');
 }
 
 function xiRows() {
   const picked = useXi() ? xiVoice()?.id : null;
-  const label = (v) => [v.accent && v.accent[0].toUpperCase() + v.accent.slice(1), v.gender, v.about].filter(Boolean).join(' · ');
-  const row = (v) => `<button class="vrow${v.id === picked ? ' on' : ''}" data-xi="${esc(v.id)}"><span>${esc(v.name.replace(/\s+-\s+.*$/, ''))}<small>${esc(label(v) || 'ElevenLabs')}</small></span><em>${aussie(v) ? 'AU' : 'EL'}</em></button>`;
+  const label = (v) => [v.accent && v.accent[0].toUpperCase() + v.accent.slice(1), v.gender].filter(Boolean).join(' · ');
+  const row = (v) => `<button class="vrow${v.id === picked ? ' on' : ''}" data-xi="${esc(v.id)}"><span>${esc(v.name.replace(/\s+[-|–]\s+.*$/, ''))}<small>${esc(label(v) || 'ElevenLabs')}</small></span>${aussie(v) ? '<em>AU</em>' : ''}</button>`;
   const mine = [...xi.voices].sort((a, b) => aussie(b) - aussie(a) || a.name.localeCompare(b.name));
-  const head = xi.collection ? `ElevenLabs · ${esc(xi.collection)}` : 'ElevenLabs · your voices';
-  return `<div class="vhead">${head}</div>${mine.map(row).join('') || '<div class="none">None yet.</div>'}`
-    + (xi.library.length ? `<div class="vhead">Australian voices from the ElevenLabs library <small>Picking one adds it to your voices when it first reads.</small></div>${xi.library.map(row).join('')}` : '');
+  return (mine.map(row).join('') || '<div class="none">No ElevenLabs voices yet.</div>')
+    + (xi.library.length ? `<div class="vhead">From the ElevenLabs library</div>${xi.library.map(row).join('')}` : '');
 }
 
 function deviceRows() {
-  const showAll = $('#layer [data-all]')?.checked;
   const mine = (navigator.language || 'en').slice(0, 2).toLowerCase();
   const seen = new Set();
   const list = voices
     .filter((v) => !seen.has(v.voiceURI) && seen.add(v.voiceURI))
-    .filter((v) => showAll || (v.lang.slice(0, 2).toLowerCase() === mine && !NOVELTY.test(v.name)))
-    .sort((a, b) => RANK[quality(a)] - RANK[quality(b)] || (b.lang.slice(0, 2).toLowerCase() === mine) - (a.lang.slice(0, 2).toLowerCase() === mine) || a.name.localeCompare(b.name));
-  const device = !useXi();
-  const picked = !device ? null : store.get('voicePick') && myVoice()?.voiceURI === store.get('voicePick') ? store.get('voicePick') : '';
+    .filter((v) => v.lang.slice(0, 2).toLowerCase() === mine)
+    .sort((a, b) => NOVELTY.test(a.name) - NOVELTY.test(b.name) || RANK[quality(a)] - RANK[quality(b)] || a.name.localeCompare(b.name));
+  const picked = useXi() ? null : store.get('voicePick') && myVoice()?.voiceURI === store.get('voicePick') ? store.get('voicePick') : '';
   const short = (v) => v.name.replace(/^Microsoft\s+/, '').replace(/\s+-\s+.*$/, '').replace(/\s*\((Premium|Enhanced)\)/i, '');
   const best = bestVoice(voices);
   const row = (uri, name, sub, q) => `<button class="vrow${uri === picked ? ' on' : ''}" data-uri="${esc(uri)}"><span>${esc(name)}<small>${esc(sub)}</small></span>${q ? `<em>${q}</em>` : ''}</button>`;
-  return `<div class="vhead">${EMBED ? 'This computer' : 'This phone'}</div>`
-    + row('', 'Automatic', best ? `Best installed: ${short(best)}${quality(best) ? ' (' + quality(best) + ')' : ''}` : 'The device’s own choice', '')
+  return (xi?.enabled ? `<div class="vhead">${EMBED ? 'This computer' : 'This iPhone'}</div>` : '')
+    + row('', 'Automatic', best ? `Best installed: ${short(best)}` : 'The device’s own choice', '')
     + list.map((v) => row(v.voiceURI, short(v), v.lang, quality(v))).join('')
-    + (list.length ? '' : `<div class="none">${voices.length ? 'No voices in your language. Turn on Show all.' : 'No voices yet…'}</div>`);
+    + (list.length ? '' : `<div class="none">${voices.length ? 'No voices in your language.' : 'No voices yet…'}</div>`);
 }
 
 /* ---------- polling ---------- */
