@@ -204,6 +204,11 @@ html.embed .card .open { opacity: 0; transition: opacity .12s ease; }
 html.embed .card:hover .open { opacity: 1; }
 html.embed .card .open:hover, html.embed .openbtn:hover { color: var(--text); border-color: var(--dim); }
 html.embed .openbtn { height: 30px; padding: 0 12px; font-size: 12.5px; }
+/* Monodesk in Mono: paper and ink (Monodesk sends "theme"; same colours as its themes/palette.css). Accents stay orange. */
+html.embed.paper { --bg: #f5f0e8; --card: #faf7f1; --line: #d6cdbd; --user: #ede7dc; --text: #1c1b19; --dim: #57524a; --faint: #857e72; color-scheme: light; }
+html.paper .m code { background: rgba(28, 27, 25, .07); }
+html.paper .m pre { background: #ede7dc; }
+html.paper .card.new .half:active { background: rgba(28, 27, 25, .05); }
 
 /* The line between a reply's spoken part and its desk detail. */
 .m hr { border: 0; border-top: 1px solid var(--line); margin: 14px 0; }

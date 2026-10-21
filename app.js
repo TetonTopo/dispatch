@@ -354,7 +354,9 @@ async function startNow(kind, text, title) {
 if (EMBED) addEventListener('message', (e) => {
   if (e.source !== parent || !e.data || e.data.to !== 'dispatch') return;
   if (e.data.type === 'new' && e.data.text) startNow(e.data.kind || 'cowork', String(e.data.text), e.data.title);
+  if (e.data.type === 'theme') root.classList.toggle('paper', !!e.data.paper); // Monodesk's Mono
 });
+toMonodesk({ type: 'ready' }); // so Monodesk sends its theme
 
 /* ---------- every recent thread, searchable ---------- */
 let allThreads = [];
