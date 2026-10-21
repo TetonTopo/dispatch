@@ -810,7 +810,8 @@ function drawCredits() {
   const per = xiPer(), m = xi.models.find((x) => x.id === xiModel());
   const c = xi.credits;
   const left = c ? `<b>${n0(c.limit - c.used)}</b> of ${n0(c.limit)} credits left${c.reset ? ' · resets ' + new Date(c.reset).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : ''}. ` : '';
-  box.innerHTML = `${left}${esc(m?.name || '')} (${esc(m?.about || '')}) costs ${per} credit${per === 1 ? '' : 's'} per character: a typical ${TYPICAL}-character reply is about <b>${n0(TYPICAL * per)}</b>. Hearing one again is free.`;
+  const more = xi.limited ? ' <span class="warn">Your key can only make speech. To see your own voices, Australian library voices and credits left, give it Voices (read and write) and User (read) access at elevenlabs.io → Developers → API Keys.</span>' : '';
+  box.innerHTML = `${left}${esc(m?.name || '')} (${esc(m?.about || '')}) costs ${per} credit${per === 1 ? '' : 's'} per character: a typical ${TYPICAL}-character reply is about <b>${n0(TYPICAL * per)}</b>. Hearing one again is free.${more}`;
 }
 
 function drawVoices() {
