@@ -39,6 +39,10 @@ const ICON = {
   send: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>',
   speak: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/><path d="M15.5 9a4 4 0 010 6M18 6.5a7.5 7.5 0 010 11"/></svg>',
   stop: '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="7" y="7" width="10" height="10" rx="2"/></svg>',
+  play: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13l11-6.5z"/></svg>',
+  pause: '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6.5" y="5" width="4" height="14" rx="1.2"/><rect x="13.5" y="5" width="4" height="14" rx="1.2"/></svg>',
+  back15: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4v5h5"/><path d="M4.6 14a8 8 0 1 0 .9-6.2L4 9"/><text x="12.5" y="16" font-size="7.5" font-weight="700" fill="currentColor" stroke="none" text-anchor="middle" font-family="system-ui, sans-serif">15</text></svg>',
+  fwd15: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 4v5h-5"/><path d="M19.4 14a8 8 0 1 1-.9-6.2L20 9"/><text x="11.5" y="16" font-size="7.5" font-weight="700" fill="currentColor" stroke="none" text-anchor="middle" font-family="system-ui, sans-serif">15</text></svg>',
   voice: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>',
 };
 
@@ -599,6 +603,7 @@ async function xiAudio(text) {
 // Called from the tap. Falls back to the device voice if ElevenLabs fails.
 function sayXi(text, key, done) {
   const me = ++run;
+  viaVoice = false;
   synth?.cancel();
   unlock();
   xiAudio(text).then((a) => {
@@ -610,6 +615,7 @@ function sayXi(text, key, done) {
     // Only this reply falls back; the next tap tries ElevenLabs again.
     toast(e.message.replace(/\.$/, '') + '. Using the phone’s voice.');
     if (synth) speak(text, { onDone: done }); else done();
+    drawPlayer();
   });
 }
 
@@ -621,6 +627,7 @@ function drawThreadSay(t) {
   if (box.innerHTML !== html) box.innerHTML = html;
 }
 function drawSay() {
+  drawPlayer();
   for (let i = 0; i < SLOTS; i++) drawCard(i);
   if (openKey && !view.hidden) drawThreadSay(threads.get(openKey) || opened);
 }
@@ -674,9 +681,11 @@ function pieces(text, bySentence) {
 }
 
 // Speak text now (call from a tap). onDone runs once, when it finishes or is stopped.
-let run = 0, queued = [], watch = null, gap = null;
+let run = 0, queued = [], watch = null, gap = null, viaVoice = false; // viaVoice: the phone's voice is reading, not an MP3
 function speak(text, { voice = myVoice(), rate = myRate(), pitch = myPitch(), pause = myPause(), onDone } = {}) {
   const me = ++run;
+  viaVoice = true;
+  voicePaused = false;
   synth.cancel();
   clearInterval(watch);
   clearTimeout(gap);
@@ -737,6 +746,69 @@ function hush() {
   clearTimeout(gap);
   synth?.cancel();
   if (saying) { saying = null; drawSay(); }
+}
+
+/* ---------- the player: while a reply is read, back 15 seconds, pause or play, forward 15 seconds ---------- */
+// An ElevenLabs reply can do all three, on screen and on the iPhone's lock screen. The phone's own voice can only
+// pause and play (speech can't be skipped through).
+const SKIP = 15;
+let voicePaused = false;
+const bar = document.createElement('div');
+bar.className = 'player';
+bar.hidden = true;
+bar.innerHTML = `<button data-p="back" aria-label="Back ${SKIP} seconds">${ICON.back15}</button><button class="pp" data-p="toggle" aria-label="Pause"></button><button data-p="fwd" aria-label="Forward ${SKIP} seconds">${ICON.fwd15}</button><span class="tm"></span><button class="x" data-p="stop" aria-label="Stop">${ICON.stop}</button>`;
+stage.appendChild(bar);
+const mp3 = () => !!player.src && !player.src.startsWith('data:'); // a reply's MP3, not the silent unlock clip
+const clock = (s) => (isFinite(s) ? `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}` : '–:––');
+
+function drawPlayer() {
+  bar.hidden = !saying;
+  if (!saying) { voicePaused = false; return; }
+  const file = mp3(), device = !file && viaVoice, paused = file ? player.paused : voicePaused;
+  const pp = $('.pp', bar);
+  pp.innerHTML = paused ? ICON.play : ICON.pause;
+  pp.setAttribute('aria-label', paused ? 'Play' : 'Pause');
+  pp.disabled = !file && !device;
+  bar.classList.toggle('voice', device); // the phone's voice: no skipping
+  bar.querySelectorAll('[data-p="back"], [data-p="fwd"]').forEach((b) => (b.disabled = !file));
+  $('.tm', bar).textContent = file ? `${clock(player.currentTime)} / ${clock(player.duration)}` : device ? '' : 'Loading…';
+}
+function skip(s) {
+  if (!mp3()) return;
+  const end = isFinite(player.duration) ? player.duration - 0.2 : Infinity;
+  player.currentTime = Math.max(0, Math.min(end, player.currentTime + s));
+  drawPlayer();
+}
+function togglePlay() {
+  if (mp3()) {
+    if (player.paused) player.play().catch(() => {}); else player.pause();
+  } else if (synth && saying) {
+    voicePaused = !voicePaused;
+    if (voicePaused) synth.pause(); else synth.resume();
+  }
+  drawPlayer();
+}
+bar.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-p]');
+  if (!b) return;
+  ({ back: () => skip(-SKIP), fwd: () => skip(SKIP), toggle: togglePlay, stop: hush })[b.dataset.p]();
+});
+['timeupdate', 'play', 'pause', 'durationchange', 'loadedmetadata'].forEach((ev) => player.addEventListener(ev, () => { if (saying) drawPlayer(); }));
+
+// The lock screen and headphones: play, pause, and skip 15 seconds while a reply plays.
+if ('mediaSession' in navigator) {
+  const ms = navigator.mediaSession;
+  const set = (a, fn) => { try { ms.setActionHandler(a, fn); } catch {} };
+  set('play', () => { if (saying && mp3()) player.play().catch(() => {}); });
+  set('pause', () => { if (saying && mp3()) player.pause(); });
+  set('stop', hush);
+  set('seekbackward', () => skip(-SKIP));
+  set('seekforward', () => skip(SKIP));
+  player.addEventListener('play', () => {
+    if (!saying || !mp3()) return;
+    const t = threads.get(saying) || (opened?.key === saying ? opened : null);
+    try { ms.metadata = new MediaMetadata({ title: t?.title || 'Claude', artist: 'Dispatch' }); } catch {}
+  });
 }
 
 /* ---------- voice picker: ElevenLabs voices up top; phone voices and settings tucked away ---------- */
