@@ -147,7 +147,8 @@ const ago = (t) => {
   if (s < 86400) return Math.floor(s / 3600) + 'h';
   return Math.floor(s / 86400) + 'd';
 };
-const status = (t) => (t.busy ? '<span class="dots"><i></i><i></i><i></i></span>' : `<span class="w">${ago(t.updated)}</span>`);
+const status = (t) => (t.ask ? '<span class="needs">Needs you</span>' : t.busy ? '<span class="dots"><i></i><i></i><i></i></span>' : `<span class="w">${ago(t.updated)}</span>`);
+const askLine = (ask) => (ask.questions.length > 1 ? `Claude asked you ${ask.questions.length} questions` : 'Claude asked you a question');
 
 /* ---------- the grid: three thread corners; the fourth is half new chat, half the list of all threads ---------- */
 const slots = Array(SLOTS).fill(null); // thread keys
@@ -204,11 +205,12 @@ function drawCard(i) {
   const lastYou = [...t.messages].reverse().find((m) => m.role === 'user');
   let ex;
   // While Claude works: what you asked, then what it's doing right now (the line claude.ai shows in grey).
-  if (t.busy) ex = `${lastYou ? `<div class="ex you">You: ${esc(firstSentence(lastYou.text))}</div>` : ''}<div class="ex dim">${working(t)}</div>`;
+  if (t.ask) ex = `<div class="ex">${esc(t.ask.questions[0]?.question || '')}</div><div class="ex dim">${askLine(t.ask)} · tap to answer</div>`;
+  else if (t.busy) ex = `${lastYou ? `<div class="ex you">You: ${esc(firstSentence(lastYou.text))}</div>` : ''}<div class="ex dim">${working(t)}</div>`;
   else if (!last) ex = '<div class="ex dim">No messages yet.</div>';
   else if (last.role === 'user') ex = `<div class="ex you">You: ${esc(firstSentence(last.text))}</div>`;
   else ex = `<div class="ex">${esc(preview(lastReply.text))}</div>`;
-  const html = `<div class="hd">${ICON[t.kind] || ICON.cowork}<span class="t">${esc(t.title)}</span>${status(t)}${lastReply && !t.busy ? sayButton(t.key) : ''}${EMBED ? '<button class="open" data-open>Open</button>' : ''}</div>${ex}`;
+  const html = `<div class="hd">${ICON[t.kind] || ICON.cowork}<span class="t">${esc(t.title)}</span>${status(t)}${(lastReply || t.ask) && !t.busy ? sayButton(t.key) : ''}${EMBED ? '<button class="open" data-open>Open</button>' : ''}</div>${ex}`;
   if (c.dataset.html !== html) { c.innerHTML = html; c.dataset.html = html; }
 }
 
@@ -311,8 +313,10 @@ function openThread(key, draft, listQuery) {
   opened = null;
   fromList = listQuery ?? null;
   showView(`<div class="top"><button class="back" aria-label="Back">‹</button><span class="hdk"></span><span class="t"></span><span class="st"></span>${synth || xi?.enabled ? `<span class="saybox"></span><button class="tbtn" data-voice aria-label="Pick a voice">${ICON.voice}</button>` : ''}${EMBED ? '<button class="openbtn" data-open>Open</button>' : ''}</div>
-    <div class="body"></div>${composerHTML()}`);
+    <div class="body"></div><div class="askbox"></div>${composerHTML()}`);
   $('.back', view).onclick = closeThread;
+  askState = null;
+  wireAsk();
   if (EMBED) $('[data-open]', view).onclick = () => openInMonodesk(openKey);
   if ($('.saybox', view)) {
     $('.saybox', view).onclick = (e) => { if (e.target.closest('[data-say]')) readAloud(openKey); };
@@ -423,6 +427,7 @@ function drawThread(fresh) {
   $('.top .t', view).textContent = t.title;
   $('.st', view).innerHTML = status(t);
   drawThreadSay(t);
+  drawAsk(t);
   const html = (t.messages.map((m) => `<div class="m ${m.role}">${m.role === 'user' ? esc(m.text) : md(m.text)}</div>`).join('') || '<div class="m assistant"><p style="color:var(--faint)">No messages yet.</p></div>')
     + (t.busy ? `<div class="m now">${working(t)}</div>` : '');
   if (body.dataset.html === html) return;
@@ -430,6 +435,69 @@ function drawThread(fresh) {
   body.innerHTML = html;
   body.dataset.html = html;
   if (fresh || nearBottom) body.scrollTop = body.scrollHeight;
+}
+
+/* ---------- Claude's multiple-choice questions ---------- */
+// When Claude stops to ask (Claude's AskUserQuestion), the thread shows the questions above the composer: tap a choice
+// (or several, where it says "Pick any"), or type something else, then Send answers. Monodesk presses the same buttons
+// on claude.ai. Skip skips them all. Typing a normal reply also works in Co-work: Claude takes it as your answer.
+let askState = null; // { id, picks: [Set of labels], other: [text] } for the question showing
+function drawAsk(t) {
+  const box = $('.askbox', view);
+  if (!box) return;
+  const ask = t?.ask;
+  if (!ask) { if (box.innerHTML) { box.innerHTML = ''; askState = null; } return; }
+  if (askState?.id === ask.id && box.innerHTML) return; // keep what you've picked while the thread refreshes
+  askState = { id: ask.id, picks: ask.questions.map(() => new Set()), other: ask.questions.map(() => '') };
+  box.innerHTML = `<div class="ask"><div class="ah">${askLine(ask)}</div>${ask.questions.map((q, i) => `
+    <div class="aq"><div class="qt">${esc(q.question)}<small>${q.multi ? 'Pick any' : 'Pick one'}</small></div>
+      <div class="opts">${q.options.map((o) => `<button class="opt" data-q="${i}" data-l="${esc(o.label)}"><b>${esc(o.label)}</b>${o.description ? `<small>${esc(o.description)}</small>` : ''}</button>`).join('')}</div>
+      <input class="oth" data-q="${i}" placeholder="Something else" autocomplete="off" enterkeyhint="done"></div>`).join('')}
+    <div class="arow"><button class="btn ghost" data-skip>Skip</button><button class="btn" data-answer disabled>Send answers</button></div></div>`;
+  lightAsk();
+}
+function lightAsk() {
+  const box = $('.askbox', view);
+  if (!box || !askState) return;
+  box.querySelectorAll('.opt').forEach((b) => b.classList.toggle('on', askState.picks[+b.dataset.q].has(b.dataset.l)));
+  const ready = askState.picks.every((p, i) => p.size || askState.other[i].trim());
+  $('[data-answer]', box).disabled = !ready;
+}
+function wireAsk() {
+  const box = $('.askbox', view);
+  box.addEventListener('click', async (e) => {
+    const t = threads.get(openKey) || opened;
+    const opt = e.target.closest('.opt');
+    if (opt && askState && t?.ask) {
+      const i = +opt.dataset.q, set = askState.picks[i];
+      if (t.ask.questions[i].multi) set.has(opt.dataset.l) ? set.delete(opt.dataset.l) : set.add(opt.dataset.l);
+      else { const had = set.has(opt.dataset.l); set.clear(); if (!had) set.add(opt.dataset.l); }
+      return lightAsk();
+    }
+    const go = e.target.closest('[data-answer], [data-skip]');
+    if (!go || !askState) return;
+    const skip = go.matches('[data-skip]');
+    box.querySelectorAll('button').forEach((b) => (b.disabled = true));
+    try {
+      await api(`/api/threads/${encodeURIComponent(openKey)}/answer`, skip ? { skip: true } : { answers: askState.picks.map((p, i) => ({ picks: [...p], other: askState.other[i].trim() })) });
+      toast(skip ? 'Skipped' : 'Answered');
+      if (t) t.ask = null;
+      box.innerHTML = '';
+      askState = null;
+      poll(true);
+    } catch (err) {
+      toast(err.message);
+      box.querySelectorAll('button').forEach((b) => (b.disabled = false));
+      lightAsk();
+    }
+  });
+  box.addEventListener('input', (e) => { const inp = e.target.closest('.oth'); if (inp && askState) { askState.other[+inp.dataset.q] = inp.value; lightAsk(); } });
+}
+// The questions, for reading aloud: "Claude asks: Which color? Red, Green or Blue."
+function askSpoken(ask) {
+  if (!ask) return '';
+  const or = (l) => (l.length > 1 ? l.slice(0, -1).join(', ') + ' or ' + l.at(-1) : l[0] || '');
+  return ask.questions.map((q) => `Claude asks: ${q.question.replace(/[?.!]*$/, '?')} ${or(q.options.map((o) => o.label))}.`).join('\n');
 }
 
 function composerHTML() {
@@ -623,7 +691,7 @@ const sayButton = (key) => `<button class="say${saying === key ? ' on' : ''}" da
 function drawThreadSay(t) {
   const box = $('.saybox', view);
   if (!box) return;
-  const html = t && t.messages.some((m) => m.role === 'assistant') ? sayButton(t.key) : '';
+  const html = t && (t.ask || t.messages.some((m) => m.role === 'assistant')) ? sayButton(t.key) : '';
   if (box.innerHTML !== html) box.innerHTML = html;
 }
 function drawSay() {
@@ -730,7 +798,7 @@ function readAloud(key) {
   if (!synth && !useXi()) return toast('This browser can’t read aloud.');
   if (saying === key) return hush();
   const t = threads.get(key) || (opened?.key === key ? opened : null);
-  const text = spoken(speechPart(latestReply(t)));
+  const text = [spoken(speechPart(latestReply(t))), askSpoken(t?.ask)].filter(Boolean).join('\n'); // and any question Claude is waiting on
   if (!text) return toast('Nothing to read yet.');
   saying = key;
   const done = () => { if (saying === key) { saying = null; drawSay(); } };
