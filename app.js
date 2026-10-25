@@ -218,6 +218,13 @@ function drawCard(i) {
 // Monodesk (Electron) has no speech service, so there holding a card just opens it.
 const Rec = EMBED ? null : window.SpeechRecognition || window.webkitSpeechRecognition;
 
+// iOS audio route. Once the mic has been used, Safari keeps the page in a record-and-play session, and on the iPhone
+// that plays out of the built-in speaker even with AirPods connected. 'playback' (Safari 17+) sends read-aloud
+// wherever the rest of the phone's audio goes; dictation switches to 'play-and-record' just for the hold.
+function audioSession(type) {
+  try { if (navigator.audioSession && navigator.audioSession.type !== type) navigator.audioSession.type = type; } catch {}
+}
+
 function dictate({ onText, onEnd }) {
   if (!Rec) return null;
   const r = new Rec();
@@ -232,8 +239,9 @@ function dictate({ onText, onEnd }) {
     onText(text);
   };
   r.onerror = (e) => { if (e.error === 'not-allowed' || e.error === 'service-not-allowed') failed = 'Allow the microphone for Dispatch to talk.'; };
-  r.onend = () => onEnd(text, failed);
-  try { r.start(); } catch { return null; }
+  r.onend = () => { audioSession('auto'); onEnd(text, failed); };
+  audioSession('play-and-record');
+  try { r.start(); } catch { audioSession('auto'); return null; }
   return r;
 }
 
@@ -629,6 +637,7 @@ const player = new Audio();
 player.setAttribute('playsinline', '');
 const SILENT = 'data:audio/mpeg;base64,//MkxAAAAANIAAAAAExBTUUzLjEwMSAoYmV0YSAzKVVVVVVVVVVMQU1FMy4xMDEg//MkxCMAAANIAAAAAChiZXRhIDMpVVVVVVVVVVVVVVVVVVVVVVVMQU1FMy4xMDEg//MkxEYAAANIAAAAAChiZXRhIDMpVVVVVVVVVVVVVVVVVVVVVVVMQU1FMy4xMDEg//MkxGkAAANIAAAAAChiZXRhIDMpVVVVVVVVVVVVVVVVVVVVVVVMQU1FMy4xMDEg//MkxIwAAANIAAAAAChiZXRhIDMpVVVVVVVVVVVVVVVVVVVVVVVMQU1FMy4xMDEg//MkxK8AAANIAAAAAChiZXRhIDMpVVVVVVVVVVVVVVVVVVVVVVVMQU1FMy4xMDEg//MkxNIAAANIAAAAAChiZXRhIDMpVVVVVVVVVVVVVVVVVVVVVVVMQU1FMy4xMDEg//MkxNwAAANIAAAAAChiZXRhIDMpVVVVVVVVVVVVVVVVVVVVVVVMQU1FMy4xMDEg//MkxNwAAANIAAAAAChiZXRhIDMpVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV//MkxNwAAANIAAAAAFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV//MkxNwAAANIAAAAAFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV//MkxNwAAANIAAAAAFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV//MkxNwAAANIAAAAAFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV//MkxNwAAANIAAAAAFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV//MkxNwAAANIAAAAAFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV';
 function unlock() {
+  audioSession('playback');
   player.src = SILENT;
   player.play().catch(() => {});
   // The same for the device voice, so it can take over if ElevenLabs fails after the tap.
@@ -639,6 +648,7 @@ function playUrl(url, onDone) {
   const me = run;
   let over = false;
   const finish = (ok) => { if (over) return; over = true; player.onended = player.onerror = null; if (me === run) onDone?.(ok); };
+  audioSession('playback');
   player.onended = () => finish(true);
   player.onerror = () => finish(false);
   player.src = url;
@@ -752,6 +762,7 @@ function pieces(text, bySentence) {
 let run = 0, queued = [], watch = null, gap = null, viaVoice = false; // viaVoice: the phone's voice is reading, not an MP3
 function speak(text, { voice = myVoice(), rate = myRate(), pitch = myPitch(), pause = myPause(), onDone } = {}) {
   const me = ++run;
+  audioSession('playback');
   viaVoice = true;
   voicePaused = false;
   synth.cancel();
