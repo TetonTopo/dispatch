@@ -666,9 +666,22 @@ async function xiAudio(text) {
   const k = JSON.stringify([body.voice, body.model, body.pause, text]);
   if (mp3s.has(k)) return { url: mp3s.get(k), credits: 0 };
   fetching = new AbortController();
-  const r = await fetch('/api/speak', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Monodesk': '1' }, body: JSON.stringify(body), signal: fetching.signal });
-  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'ElevenLabs didn’t answer');
-  const url = URL.createObjectURL(await r.blob());
+  // "Load failed" is the connection dropping (a slow Tailscale relay, a long reply): ask again. Monodesk is still making
+  // the same audio or already has it, so asking again costs nothing.
+  let r, blob;
+  for (let tries = 0; ; tries++) {
+    try {
+      r = await fetch('/api/speak', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Monodesk': '1' }, body: JSON.stringify(body), signal: fetching.signal });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'ElevenLabs didn’t answer');
+      blob = await r.blob();
+      break;
+    } catch (e) {
+      if (e.name === 'AbortError' || !(e instanceof TypeError) || tries >= 3) throw e;
+      if (tries === 0) toast('Connection dropped. Still getting the voice…');
+      await new Promise((ok) => setTimeout(ok, 1500));
+    }
+  }
+  const url = URL.createObjectURL(blob);
   mp3s.set(k, url);
   // A library voice was just added to your ElevenLabs voices: from now on it's one of yours.
   const now = r.headers.get('X-Voice');
