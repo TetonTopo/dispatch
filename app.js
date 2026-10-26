@@ -341,6 +341,8 @@ function openThread(key, draft, listQuery) {
   });
   drawThread(true);
   if (!threads.has(key)) loadOpened();
+  // Claude's page for this thread starts opening on the computer now, so a reply typed here goes straight away.
+  if (!DEMO) api(`/api/threads/${encodeURIComponent(key)}/warm`, {}).catch(() => {});
 }
 
 async function loadOpened() {
@@ -587,11 +589,21 @@ function wireComposer(initial, onSend) {
   ta.addEventListener('input', grow);
   grow();
   if (initial || pendingNew) setTimeout(() => ta.focus(), 60);
+  // Tapping into the box opens Claude's page for this thread on the computer (at most every half minute), so sending is quick.
+  let warmed = 0;
+  ta.addEventListener('focus', () => { if (openKey && !DEMO && Date.now() - warmed > 30e3) { warmed = Date.now(); api(`/api/threads/${encodeURIComponent(openKey)}/warm`, {}).catch(() => {}); } });
   const go = async () => {
     const text = ta.value.trim();
     if (!text) return;
     send.disabled = true;
-    try { await onSend(text); ta.value = ''; grow(); } catch (e) { toast(e.message); send.disabled = false; }
+    send.classList.add('busy');
+    // Say so when it's slow, instead of looking stuck.
+    const slow = setTimeout(() => toast('Sending… Claude’s page on the computer is still opening.'), 4000);
+    try { await onSend(text); ta.value = ''; grow(); } catch (e) {
+      // "Load failed": the phone lost the connection. The message may still have gone, so check before sending again.
+      toast(e instanceof TypeError ? 'Lost the connection. It may have sent: check the thread before trying again.' : e.message);
+      send.disabled = false;
+    } finally { clearTimeout(slow); send.classList.remove('busy'); }
   };
   send.onclick = go;
   // A hardware keyboard's Enter sends; Shift+Enter makes a new line.

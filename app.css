@@ -195,6 +195,9 @@ html.embed .player button svg { width: 21px; height: 21px; }
 .icbtn svg { width: 20px; height: 20px; }
 .icbtn.on { background: var(--accent); color: #1f1e1d; }
 .icbtn.send { background: var(--text); color: var(--bg); }
+/* Sending: the arrow pulses until Claude has it. */
+.icbtn.send.busy { animation: sending 1s ease-in-out infinite; }
+@keyframes sending { 50% { opacity: .35; } }
 .icbtn:disabled { opacity: .35; }
 
 button { font: inherit; color: inherit; }
