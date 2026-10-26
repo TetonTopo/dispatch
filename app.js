@@ -43,6 +43,8 @@ const ICON = {
   pause: '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6.5" y="5" width="4" height="14" rx="1.2"/><rect x="13.5" y="5" width="4" height="14" rx="1.2"/></svg>',
   back15: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4v5h5"/><path d="M4.6 14a8 8 0 1 0 .9-6.2L4 9"/><text x="12.5" y="16" font-size="7.5" font-weight="700" fill="currentColor" stroke="none" text-anchor="middle" font-family="system-ui, sans-serif">15</text></svg>',
   fwd15: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 4v5h-5"/><path d="M19.4 14a8 8 0 1 1-.9-6.2L20 9"/><text x="11.5" y="16" font-size="7.5" font-weight="700" fill="currentColor" stroke="none" text-anchor="middle" font-family="system-ui, sans-serif">15</text></svg>',
+  saved: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15v-3a8 8 0 0116 0v3"/><rect x="3.5" y="14" width="4" height="6" rx="1.5"/><rect x="16.5" y="14" width="4" height="6" rx="1.5"/></svg>',
+  x: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>',
   voice: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>',
 };
 
@@ -166,9 +168,11 @@ for (let i = 0; i < SLOTS; i++) {
 const newCard = document.createElement('section');
 newCard.className = 'card new';
 newCard.innerHTML = `<button class="half" data-new><div class="plus">+</div><span>New chat</span></button>
-  <button class="half" data-all><div class="plus">${ICON.list}</div><span>All threads</span></button>`;
+  <button class="half" data-all><div class="plus">${ICON.list}</div><span>All threads</span></button>
+  <button class="half" data-saved><div class="plus">${ICON.saved}</div><span>Saved</span></button>`;
 $('[data-new]', newCard).addEventListener('click', pickKind);
 $('[data-all]', newCard).addEventListener('click', () => openList());
+$('[data-saved]', newCard).addEventListener('click', () => openSaved());
 grid.appendChild(newCard);
 
 function placeThreads(list) {
@@ -330,6 +334,7 @@ function openThread(key, draft, listQuery) {
     $('.saybox', view).onclick = (e) => { if (e.target.closest('[data-say]')) readAloud(openKey); };
     $('[data-voice]', view).onclick = pickVoice;
   }
+  $('.body', view).addEventListener('click', (e) => { const f = e.target.closest('.mfoot [data-say]'); if (f) readPart(openKey, +f.parentElement.dataset.from); });
   wireComposer(draft, async (text) => {
     await api(`/api/threads/${encodeURIComponent(openKey)}/reply`, { text });
     poll(true);
@@ -403,6 +408,62 @@ function drawList() {
   body.querySelectorAll('[data-key]').forEach((b) => b.addEventListener('click', () => openThread(b.dataset.key, '', input.value)));
 }
 
+/* ---------- saved readings: every reply read in an ElevenLabs voice, kept on the computer ---------- */
+// Tap one to hear it again (free, even after the thread has moved on), with the same back / forward 15 s player.
+let savedRows = null;
+function openSaved() {
+  openKey = null; pendingNew = null; fromList = null;
+  savedRows = null;
+  showView(`<div class="top"><button class="back" aria-label="Back">‹</button><span class="hdk">${ICON.saved}</span><span class="t">Saved readings</span></div>
+    <div class="body list saved"></div>`);
+  $('.back', view).onclick = closeThread;
+  const body = $('.saved', view);
+  body.addEventListener('click', (e) => {
+    const x = e.target.closest('[data-forget]');
+    if (x) {
+      e.stopPropagation();
+      if (!confirm('Remove this reading? Hearing it again would cost credits.')) return;
+      if (saying === 'saved:' + x.dataset.forget) hush();
+      api(`/api/readings/${x.dataset.forget}/forget`, {}).then(() => { savedRows = savedRows.filter((r) => r.id !== x.dataset.forget); drawSaved(); }).catch((er) => toast(er.message));
+      return;
+    }
+    const row = e.target.closest('[data-id]');
+    if (row) playSaved(savedRows.find((r) => r.id === row.dataset.id));
+  });
+  drawSaved();
+  api('/api/readings').then((r) => { savedRows = r.readings || []; drawSaved(); }).catch((e) => { savedRows = []; drawSaved(); toast(e.message); });
+}
+const runTime = (s) => (s >= 60 ? `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}` : `0:${String(s).padStart(2, '0')}`);
+function drawSaved() {
+  const body = !view.hidden && $('.saved', view);
+  if (!body) return;
+  const html = !savedRows ? '<div class="none">Loading…</div>'
+    : !savedRows.length ? '<div class="none">Nothing saved yet. Every reply you hear in an ElevenLabs voice lands here.</div>'
+    : savedRows.map((r) => `<div class="row${saying === 'saved:' + r.id ? ' on' : ''}" data-id="${r.id}" role="button">
+        <span class="say${saying === 'saved:' + r.id ? ' on' : ''}">${saying === 'saved:' + r.id ? ICON.stop : ICON.play}</span>
+        <span class="tx"><span class="t">${esc(r.title)}</span><span class="pv">${esc(r.preview)}</span></span>
+        <span class="w">${runTime(r.secs || 0)}<br>${ago(r.at)}</span>
+        <button class="fx" data-forget="${r.id}" aria-label="Remove">${ICON.x}</button></div>`).join('');
+  if (body.dataset.html !== html) { body.innerHTML = html; body.dataset.html = html; }
+}
+const savedUrls = new Map();
+function playSaved(r) {
+  if (!r) return;
+  const key = 'saved:' + r.id;
+  if (saying === key) return hush();
+  const me = ++run;
+  saying = key;
+  sayTitle = r.title;
+  viaVoice = false;
+  synth?.cancel();
+  unlock();
+  drawSay();
+  const done = () => { if (saying === key) { saying = null; drawSay(); } };
+  (savedUrls.has(r.id) ? Promise.resolve(savedUrls.get(r.id)) : fetchAudio(`/api/readings/${r.id}`, { cache: 'no-store' }).then(({ blob }) => { const u = URL.createObjectURL(blob); savedUrls.set(r.id, u); return u; }))
+    .then((url) => { if (me === run) playUrl(url, done).catch(() => toast('Tap it again to play it.')); })
+    .catch((e) => { if (me !== run || e.name === 'AbortError') return; toast(e.message); done(); });
+}
+
 // A brand-new thread: the same screen, empty until the first message goes.
 function openNew(kind, env, label) {
   openKey = null;
@@ -436,7 +497,13 @@ function drawThread(fresh) {
   $('.st', view).innerHTML = status(t);
   drawThreadSay(t);
   drawAsk(t);
-  const html = (t.messages.map((m) => `<div class="m ${m.role}">${m.role === 'user' ? esc(m.text) : md(m.text)}</div>`).join('') || '<div class="m assistant"><p style="color:var(--faint)">No messages yet.</p></div>')
+  // A speaker under each of Claude's replies (everything it said between two of your messages), to hear an older one again.
+  const can = synth || xi?.enabled;
+  const msgs = t.messages;
+  const from = (i) => { while (i > 0 && msgs[i - 1].role === 'assistant') i--; return i; };
+  const html = (msgs.map((m, i) => m.role === 'user' ? `<div class="m user">${esc(m.text)}</div>`
+    : `<div class="m assistant">${md(m.text)}${can && msgs[i + 1]?.role !== 'assistant' ? `<div class="mfoot" data-from="${from(i)}">${sayButton(t.key + '#' + from(i))}</div>` : ''}</div>`).join('')
+    || '<div class="m assistant"><p style="color:var(--faint)">No messages yet.</p></div>')
     + (t.busy ? `<div class="m now">${working(t)}</div>` : '');
   if (body.dataset.html === html) return;
   const nearBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 60;
@@ -660,27 +727,29 @@ function playUrl(url, onDone) {
 // The MP3 for a reply, from the bridge. Each one is kept here too, so hearing it again is free and instant.
 const mp3s = new Map();
 let fetching = null;
-async function xiAudio(text) {
-  const v = xiVoice();
-  const body = { text, voice: v?.id, owner: v && !v.mine ? v.owner : undefined, model: xiModel(), pause: myPause() };
-  const k = JSON.stringify([body.voice, body.model, body.pause, text]);
-  if (mp3s.has(k)) return { url: mp3s.get(k), credits: 0 };
+// "Load failed" is the connection dropping (a slow Tailscale relay, a long reply): ask again. Monodesk is still making
+// the same audio or already has it, so asking again costs nothing.
+async function fetchAudio(path, init) {
   fetching = new AbortController();
-  // "Load failed" is the connection dropping (a slow Tailscale relay, a long reply): ask again. Monodesk is still making
-  // the same audio or already has it, so asking again costs nothing.
-  let r, blob;
   for (let tries = 0; ; tries++) {
     try {
-      r = await fetch('/api/speak', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Monodesk': '1' }, body: JSON.stringify(body), signal: fetching.signal });
+      const r = await fetch(path, { ...init, signal: fetching.signal });
       if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'ElevenLabs didn’t answer');
-      blob = await r.blob();
-      break;
+      return { r, blob: await r.blob() };
     } catch (e) {
       if (e.name === 'AbortError' || !(e instanceof TypeError) || tries >= 3) throw e;
       if (tries === 0) toast('Connection dropped. Still getting the voice…');
       await new Promise((ok) => setTimeout(ok, 1500));
     }
   }
+}
+// meta (title, thread, kind) names it in the Saved list; it isn't part of what's read.
+async function xiAudio(text, meta = {}) {
+  const v = xiVoice();
+  const body = { text, voice: v?.id, owner: v && !v.mine ? v.owner : undefined, model: xiModel(), pause: myPause() };
+  const k = JSON.stringify([body.voice, body.model, body.pause, text]);
+  if (mp3s.has(k)) return { url: mp3s.get(k), credits: 0 };
+  const { r, blob } = await fetchAudio('/api/speak', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Monodesk': '1' }, body: JSON.stringify({ ...body, ...meta }) });
   const url = URL.createObjectURL(blob);
   mp3s.set(k, url);
   // A library voice was just added to your ElevenLabs voices: from now on it's one of yours.
@@ -692,12 +761,12 @@ async function xiAudio(text) {
 }
 
 // Called from the tap. Falls back to the device voice if ElevenLabs fails.
-function sayXi(text, key, done) {
+function sayXi(text, key, done, meta) {
   const me = ++run;
   viaVoice = false;
   synth?.cancel();
   unlock();
-  xiAudio(text).then((a) => {
+  xiAudio(text, meta).then((a) => {
     if (me !== run) return;
     const cost = a.credits ? `${n0(a.credits)} credits` + (a.left != null ? ` · ${k0(a.left)} left` : '') : 'Already paid for: free';
     playUrl(a.url, done).then(() => toast(cost), () => { toast('Tap the speaker again to play it.'); });
@@ -720,7 +789,8 @@ function drawThreadSay(t) {
 function drawSay() {
   drawPlayer();
   for (let i = 0; i < SLOTS; i++) drawCard(i);
-  if (openKey && !view.hidden) drawThreadSay(threads.get(openKey) || opened);
+  if (openKey && !view.hidden) { drawThreadSay(threads.get(openKey) || opened); drawThread(); }
+  drawSaved();
 }
 
 // Claude's latest reply: everything it said since your last message (or its last message, if you've spoken since).
@@ -823,10 +893,25 @@ function readAloud(key) {
   if (saying === key) return hush();
   const t = threads.get(key) || (opened?.key === key ? opened : null);
   const text = [spoken(speechPart(latestReply(t))), askSpoken(t?.ask)].filter(Boolean).join('\n'); // and any question Claude is waiting on
+  sayText(key, text, t);
+}
+// One of Claude's earlier replies in a thread: everything it said from message `from` until your next message.
+function readPart(key, from) {
+  const sk = key + '#' + from;
+  if (saying === sk) return hush();
+  const t = threads.get(key) || (opened?.key === key ? opened : null);
+  const msgs = t?.messages || [];
+  const part = [];
+  for (let i = from; msgs[i]?.role === 'assistant'; i++) part.push(msgs[i].text);
+  sayText(sk, spoken(speechPart(part.join('\n\n'))), t);
+}
+let sayTitle = ''; // what the lock screen shows
+function sayText(key, text, t) {
   if (!text) return toast('Nothing to read yet.');
   saying = key;
+  sayTitle = t?.title || 'Claude';
   const done = () => { if (saying === key) { saying = null; drawSay(); } };
-  if (useXi()) sayXi(text, key, done);
+  if (useXi()) sayXi(text, key, done, { title: t?.title, thread: t?.key, kind: t?.kind });
   else speak(text, { onDone: done });
   drawSay();
 }
@@ -898,8 +983,7 @@ if ('mediaSession' in navigator) {
   set('seekforward', () => skip(SKIP));
   player.addEventListener('play', () => {
     if (!saying || !mp3()) return;
-    const t = threads.get(saying) || (opened?.key === saying ? opened : null);
-    try { ms.metadata = new MediaMetadata({ title: t?.title || 'Claude', artist: 'Dispatch' }); } catch {}
+    try { ms.metadata = new MediaMetadata({ title: sayTitle || 'Claude', artist: 'Dispatch' }); } catch {}
   });
 }
 

@@ -168,6 +168,21 @@ html.embed .player button svg { width: 21px; height: 21px; }
 .list .row .t { flex: 1; min-width: 0; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .list .row .w { font-size: 12px; color: var(--faint); flex: none; }
 .list .none { color: var(--faint); font-size: 14px; text-align: center; padding: 24px; }
+/* Saved readings: title over the opening words, its length and when, and a small remove. */
+#thread .top .hdk svg { width: 17px; height: 17px; display: block; color: var(--accent); }
+.saved .row { cursor: pointer; align-items: center; }
+.saved .row.on { background: var(--card); }
+.saved .row .say { margin: 0; border: 1px solid var(--line); }
+.saved .row .say svg { width: 13px; height: 13px; }
+.saved .row .tx { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.saved .row .tx .t { flex: none; }
+.saved .row .pv { font-size: 12.5px; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.saved .row .w { text-align: right; line-height: 1.35; font-variant-numeric: tabular-nums; }
+.saved .row .fx { width: 28px; height: 28px; flex: none; border: 0; border-radius: 50%; background: transparent; color: var(--faint); display: grid; place-items: center; padding: 0; }
+.saved .row .fx svg { width: 13px; height: 13px; }
+/* The speaker under each of Claude's replies in a thread. */
+.m .mfoot { display: flex; justify-content: flex-end; margin-top: 2px; }
+.m .mfoot .say { margin: 0; }
 .m pre code { background: none; padding: 0; }
 .m a { color: var(--accent); }
 

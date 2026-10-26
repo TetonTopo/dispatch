@@ -9,6 +9,8 @@ Your Claude chats on the iPhone home screen. The three most recent Claude thread
 - **Player:** while a reply is read, a small bar at the bottom has **back 15 s**, **pause / play**, **forward 15 s**, the time, and stop. The same back, forward and pause work from the iPhone's lock screen and headphones. With the device's own voice there's only pause / play and stop (speech can't be skipped through).
 - **New chat** starts a Co-work chat or a Claude Code session (pick the environment), always on Opus 5.5.
 - **All threads** lists your recent chats and Code sessions, with search. Tap one to open it.
+- **Saved** lists every reply you've heard in an ElevenLabs voice, newest first: the thread's name, the opening words, how long it runs and when. Tap one to hear it again with the same player, free, even after the thread has moved on. × removes one (hearing it again would cost credits). Monodesk keeps them on the PC: the newest 200, up to 1 GB.
+- **Earlier replies:** in a thread, each of Claude's replies has its own speaker underneath, so you can scroll back and hear an older one. The speaker at the top still reads the latest.
 - Add `?demo` to the address to see it with made-up data.
 
 Dispatch is only the phone side: plain HTML, CSS and JS, with no build step. The server is part of [Monodesk](https://github.com/TetonTopo/monodesk) (`bridge.js`), which uses Monodesk's Claude sign-in. **Monodesk must be running on your PC** for Dispatch to work.
