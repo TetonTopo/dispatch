@@ -17,7 +17,7 @@
   --vh: 100dvh;
 }
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--text); font: 15px/1.45 var(--sans); overscroll-behavior: none; }
+html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--text); font: 15px/1.45 var(--sans); overscroll-behavior: none; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 
 /* The stage is the landscape screen. Held sideways it simply fills the window. */
 #stage {
